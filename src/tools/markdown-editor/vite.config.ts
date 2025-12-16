@@ -11,7 +11,7 @@ export default defineConfig({
     }
   },
   build: {
-    outDir: '../../../dist/example-tool',
+    outDir: '../../../dist/markdown-editor',
     emptyOutDir: true,
     rollupOptions: {
       output: {

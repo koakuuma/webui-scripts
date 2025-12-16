@@ -1,0 +1,126 @@
+body {
+  background-color: rgb(32, 32, 32);
+  margin: 0;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  overflow: hidden;
+  cursor: auto;
+  color: #fff;
+  font-family: sans-serif;
+}
+
+#app {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+}
+
+.play-button {
+  width: 100px;
+  height: 100px;
+  background-color: transparent;
+  border: 2px solid white;
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  transition: transform 0.2s ease-in-out;
+
+  &:hover {
+    transform: scale(1.1);
+  }
+
+  &::before {
+    content: '';
+    display: block;
+    width: 0;
+    height: 0;
+    border-top: 20px solid transparent;
+    border-bottom: 20px solid transparent;
+    border-left: 30px solid white;
+    margin-left: 5px;
+  }
+}
+
+.fullscreen-container {
+  width: 100%;
+  height: 100%;
+  background-color: black;
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 9999;
+  cursor: none;
+  overflow: hidden;
+
+  &.active {
+    display: block;
+  }
+
+  &.show-cursor {
+    cursor: auto;
+  }
+}
+
+.fullscreen-message {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  color: rgba(200, 200, 200, 0.7);
+  font-size: 24px;
+  text-align: center;
+  display: none;
+  pointer-events: none;
+  user-select: none;
+  animation: fadeIn 0.5s ease-in-out;
+
+  .countdown {
+    font-size: 1.2em;
+    font-weight: bold;
+    display: inline-block;
+    animation: pulse 1s infinite alternate;
+  }
+}
+
+.fullscreen-container.show-message .fullscreen-message {
+  display: block;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes pulse {
+  from {
+    transform: scale(1);
+  }
+
+  to {
+    transform: scale(1.1);
+  }
+}
+
+.description {
+  margin-top: 20px;
+  text-align: center;
+  font-size: 1.2em;
+
+  p {
+    margin: 5px 0;
+  }
+}

@@ -30,8 +30,8 @@ function startDevServer(toolName, port) {
   console.log(`\n启动 ${toolName} 开发服务器 (端口: ${port})...`)
   
   const viteProcess = spawn(
-    'vite',
-    ['--port', port.toString(), '--open'],
+    'npx',
+    ['vite', '--port', port.toString()],
     {
       cwd: toolPath,
       stdio: 'inherit',

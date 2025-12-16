@@ -34,7 +34,7 @@ function buildTool(name) {
   
   try {
     execSync(
-      `vite build --config vite.config.ts --outDir ${outDir}`,
+      `npx vite build --config vite.config.ts --outDir ${outDir}`,
       {
         stdio: 'inherit',
         cwd: toolPath,
