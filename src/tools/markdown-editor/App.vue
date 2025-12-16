@@ -35,7 +35,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, watch, nextTick } from 'vue'
+import { ref, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import MarkdownIt from 'markdown-it'
 import hljs from 'highlight.js'
 import katex from 'katex'
@@ -294,6 +294,19 @@ onMounted(() => {
 
   // 监听键盘快捷键
   document.addEventListener('keydown', handleKeydown)
+
+  // 监听窗口大小变化
+  window.addEventListener('resize', handleResize)
+
+  // 初始构建滚动映射 (延迟以确保渲染完成)
+  setTimeout(() => {
+    buildScrollMap()
+  }, 500)
+})
+
+onUnmounted(() => {
+  document.removeEventListener('keydown', handleKeydown)
+  window.removeEventListener('resize', handleResize)
 })
 
 // 监听变化
@@ -341,9 +354,21 @@ const renderMarkdown = () => {
         ],
         throwOnError: false
       })
+
+      // 监听图片加载
+      const images = preview.value.querySelectorAll('img')
+      images.forEach(img => {
+        img.addEventListener('load', buildScrollMap)
+      })
+
       buildScrollMap()
     }
   })
+}
+
+const handleResize = () => {
+  adjustTextareaHeight()
+  buildScrollMap()
 }
 
 const adjustTextareaHeight = () => {
@@ -375,11 +400,18 @@ const applyTheme = (themeName: string) => {
   }
 }
 
+// 获取编辑器行高
+const getEditorLineHeight = () => {
+  if (!editor.value) return 22.4
+  const computedStyle = window.getComputedStyle(editor.value)
+  const lineHeight = parseFloat(computedStyle.lineHeight)
+  return isNaN(lineHeight) ? 22.4 : lineHeight
+}
+
 // 构建滚动映射
 const buildScrollMap = () => {
   if (!editor.value || !preview.value) return
 
-  const lineHeight = 22.4 // 假设行高，可以通过计算获取更准确的值
   const lines = content.value.split('\n')
   const _scrollMap: number[] = []
   const nonEmptyList: number[] = []
@@ -435,13 +467,17 @@ const handleEditorScroll = () => {
   if (!syncingEditor && syncMode.value === 'to-preview' && previewScrollContainer.value && editor.value) {
     syncingPreview = true
 
-    const lineHeight = 22.4 // 估计行高
+    const lineHeight = getEditorLineHeight()
     const scrollTop = editorScrollContainer.value.scrollTop
     const lineIndex = Math.floor(scrollTop / lineHeight)
 
     if (scrollMap && scrollMap.length > lineIndex) {
       const targetScrollTop = scrollMap[lineIndex]
-      previewScrollContainer.value.scrollTop = targetScrollTop
+      // 平滑滚动
+      previewScrollContainer.value.scrollTo({
+        top: targetScrollTop,
+        behavior: 'auto'
+      })
     }
 
     setTimeout(() => {
@@ -472,8 +508,11 @@ const handlePreviewScroll = () => {
       }
     }
 
-    const lineHeight = 22.4
-    editorScrollContainer.value.scrollTop = lineIndex * lineHeight
+    const lineHeight = getEditorLineHeight()
+    editorScrollContainer.value.scrollTo({
+      top: lineIndex * lineHeight,
+      behavior: 'auto'
+    })
 
     setTimeout(() => {
       syncingEditor = false
