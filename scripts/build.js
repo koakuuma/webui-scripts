@@ -30,7 +30,7 @@ function buildTool(name) {
   console.log(`\n正在编译工具: ${name}`)
   
   const toolPath = join(scriptsDir, name)
-  const outDir = join(rootDir, 'dist', name)
+  const outDir = join(rootDir, 'docs', name)
   
   try {
     execSync(
