@@ -1506,7 +1506,6 @@ const runTimer = () => {
         if (swRegistration) swRegistration.showNotification('计时结束', { body: '您的计时器已结束', requireInteraction: false })
         else new Notification('计时结束', { body: '您的计时器已结束' })
       }
-      alert('计时结束！')
     }
   }, 1000)
 }
