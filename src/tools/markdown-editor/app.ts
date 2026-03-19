@@ -113,7 +113,6 @@ const middleScrollState = ref<{
 let dbPromise: Promise<IDBDatabase> | null = null
 let syncingEditor = false
 let syncingPreview = false
-let scrollMap: number[] = []
 let suppressEditorChange = false
 let isResizingSidebar = false
 let isResizingPreview = false
@@ -549,71 +548,18 @@ function scheduleRenderMarkdown(delay = 40) {
 }
 
 function buildScrollMap() {
-  if (!preview.value || !activeFile.value) {
-    scrollMap = []
-    return
-  }
-
-  const lines = activeFile.value.content.split('\n')
-  const nextScrollMap: number[] = []
-  const nonEmptyLines: number[] = []
-  const elements = preview.value.querySelectorAll('[data-source-line]')
-  const offsetMap: Record<number, number> = {}
-
-  elements.forEach((element) => {
-    const line = parseInt(element.getAttribute('data-source-line') || '0', 10)
-    if (!Number.isNaN(line)) {
-      offsetMap[line] = (element as HTMLElement).offsetTop
-    }
-  })
-
-  let position = 0
-  for (let index = 0; index < lines.length; index++) {
-    if (offsetMap[index + 1] !== undefined) {
-      position = offsetMap[index + 1]
-      nonEmptyLines.push(index)
-    }
-    nextScrollMap.push(position)
-  }
-
-  nonEmptyLines.push(lines.length)
-  nextScrollMap.push(preview.value.scrollHeight)
-
-  let pointer = 0
-  for (let index = 0; index < lines.length; index++) {
-    if (index === nonEmptyLines[pointer]) {
-      pointer++
-      continue
-    }
-
-    const startLine = nonEmptyLines[pointer - 1]
-    const endLine = nonEmptyLines[pointer]
-    const startOffset = nextScrollMap[startLine] ?? 0
-    const endOffset = nextScrollMap[endLine] ?? startOffset
-    const distance = endLine - startLine || 1
-
-    nextScrollMap[index] = startOffset + (endOffset - startOffset) * (index - startLine) / distance
-  }
-
-  scrollMap = nextScrollMap
+  if (!preview.value || !activeFile.value) return
 
   handleEditorScroll()
 }
 
 function handleEditorScroll() {
   if (!editorInstance.value || !previewScrollContainer.value || syncingEditor || !activeFile.value) return
-  if (scrollMap.length === 0) return
-
-  const visibleRange = editorInstance.value.getVisibleRanges()[0]
-  const lineNumber = visibleRange?.startLineNumber ?? 1
+  const editorMaxScroll = Math.max(0, editorInstance.value.getScrollHeight() - editorInstance.value.getLayoutInfo().height)
+  const previewMaxScroll = Math.max(0, previewScrollContainer.value.scrollHeight - previewScrollContainer.value.clientHeight)
   const currentTop = editorInstance.value.getScrollTop()
-  const lineTop = editorInstance.value.getTopForLineNumber(lineNumber)
-  const nextLineTop = editorInstance.value.getTopForLineNumber(lineNumber + 1)
-  const ratio = nextLineTop > lineTop ? (currentTop - lineTop) / (nextLineTop - lineTop) : 0
-  const safeRatio = Math.max(0, Math.min(1, ratio))
-  const base = scrollMap[lineNumber - 1] ?? 0
-  const next = scrollMap[lineNumber] ?? base
-  const targetTop = base + (next - base) * safeRatio
+  const progress = editorMaxScroll > 0 ? currentTop / editorMaxScroll : 0
+  const targetTop = previewMaxScroll * Math.max(0, Math.min(1, progress))
 
   syncingPreview = true
   window.cancelAnimationFrame(previewSyncFrame)
@@ -630,25 +576,14 @@ function handleEditorScroll() {
 
 function handlePreviewScroll() {
   if (!previewScrollContainer.value || !editorInstance.value || syncingPreview || !activeFile.value) return
-  if (scrollMap.length === 0) return
 
   activePane.value = 'preview'
 
   const top = previewScrollContainer.value.scrollTop
-  let lineIndex = 0
-
-  while (lineIndex < scrollMap.length - 1 && scrollMap[lineIndex + 1] <= top) {
-    lineIndex++
-  }
-
-  const base = scrollMap[lineIndex] ?? 0
-  const next = scrollMap[lineIndex + 1] ?? base
-  const ratio = next > base ? (top - base) / (next - base) : 0
-  const safeRatio = Math.max(0, Math.min(1, ratio))
-  const lineNumber = Math.max(1, lineIndex + 1)
-  const lineTop = editorInstance.value.getTopForLineNumber(lineNumber)
-  const nextLineTop = editorInstance.value.getTopForLineNumber(lineNumber + 1)
-  const targetTop = lineTop + (nextLineTop - lineTop) * safeRatio
+  const previewMaxScroll = Math.max(0, previewScrollContainer.value.scrollHeight - previewScrollContainer.value.clientHeight)
+  const editorMaxScroll = Math.max(0, editorInstance.value.getScrollHeight() - editorInstance.value.getLayoutInfo().height)
+  const progress = previewMaxScroll > 0 ? top / previewMaxScroll : 0
+  const targetTop = editorMaxScroll * Math.max(0, Math.min(1, progress))
 
   syncingEditor = true
   window.cancelAnimationFrame(editorSyncFrame)
