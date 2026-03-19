@@ -1,229 +1,272 @@
 <template>
   <div class="container">
     <div class="header">
-      <div class="title">Markdown 编辑预览器</div>
+      <div class="title-group">
+        <div class="title">Markdown 编辑预览器</div>
+        <div class="subtitle">更接近 VS Code 的双栏编辑与实时渲染体验</div>
+      </div>
       <div class="controls">
         <div class="sync-control">
-          <span>滚动同步：</span>
-          <label><input type="radio" v-model="syncMode" value="none"> 不同步</label>
-          <label><input type="radio" v-model="syncMode" value="to-preview"> 同步右侧</label>
-          <label><input type="radio" v-model="syncMode" value="to-editor"> 同步左侧</label>
+          <span class="control-label">滚动同步</span>
+          <label><input v-model="syncMode" type="radio" value="none"> 不同步</label>
+          <label><input v-model="syncMode" type="radio" value="to-preview"> 同步右侧</label>
+          <label><input v-model="syncMode" type="radio" value="to-editor"> 同步左侧</label>
         </div>
-        <button @click="saveContent" class="btn">保存<span class="shortcut-hint">(Ctrl+S)</span></button>
-        <button @click="exportMarkdown" class="btn">导出文件</button>
+        <button class="btn" @click="saveContent">保存<span class="shortcut-hint">Ctrl+S</span></button>
+        <button class="btn" @click="exportMarkdown">导出文件</button>
         <select v-model="currentTheme" class="theme-selector">
           <option v-for="(theme, key) in themes" :key="key" :value="key">{{ theme.name }}</option>
         </select>
       </div>
     </div>
     <div class="editor-container">
-      <div class="editor-pane">
+      <section class="pane editor-pane">
+        <div class="pane-toolbar">
+          <span class="pane-label">编辑器</span>
+          <span class="pane-meta">{{ lineCount }} 行</span>
+        </div>
         <div class="editor-scroll-container" ref="editorScrollContainer" @scroll="handleEditorScroll">
           <div class="line-numbers" ref="lineNumbers" v-html="lineNumbersHTML"></div>
-          <textarea id="editor" ref="editor" v-model="content" spellcheck="false" @input="handleInput"
-            @scroll="handleTextareaScroll"></textarea>
+          <textarea
+            id="editor"
+            ref="editor"
+            v-model="content"
+            spellcheck="false"
+            @input="handleInput"
+            @scroll="handleTextareaScroll"
+          ></textarea>
         </div>
-      </div>
-      <div class="preview-pane">
+      </section>
+      <div class="splitter" aria-hidden="true"></div>
+      <section class="pane preview-pane">
+        <div class="pane-toolbar">
+          <span class="pane-label">预览</span>
+          <span class="pane-meta">{{ currentThemeLabel }}</span>
+        </div>
         <div class="preview-scroll-container" ref="previewScrollContainer" @scroll="handlePreviewScroll">
-          <div id="preview" ref="preview" v-html="renderedContent"></div>
+          <article id="preview" ref="preview" class="markdown-preview" v-html="renderedContent"></article>
         </div>
-      </div>
+      </section>
+    </div>
+    <div class="status-bar">
+      <span>{{ lineCount }} 行</span>
+      <span>{{ wordCount }} 词</span>
+      <span>{{ syncModeLabel }}</span>
     </div>
   </div>
   <div class="tooltip" :class="{ show: tooltip.show }">{{ tooltip.message }}</div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import MarkdownIt from 'markdown-it'
 import hljs from 'highlight.js'
-import katex from 'katex'
 // @ts-ignore
 import renderMathInElement from 'katex/dist/contrib/auto-render'
 
-// 类型定义
 interface Theme {
   name: string
   vars: Record<string, string>
 }
 
-// 主题配置
 const themes: Record<string, Theme> = {
-  'coffee-dark': {
-    name: '咖啡色 - 暗色',
+  'vscode-dark': {
+    name: 'VS Code - 暗色',
     vars: {
-      '--bg-color': '#231F1E',
-      '--line-number-bg-color': '#292423',
-      '--text-color': '#eee',
-      '--k-color-primary': '#F09176',
-      '--line-number-text-color': '#ccc',
-      '--tooltip-bg-color': '#111',
-      '--tooltip-text-color': '#eee',
-      '--scrollbar-thumb': 'rgba(240, 145, 118, 0.5)',
-      '--scrollbar-track': 'rgba(0, 0, 0, 0.2)',
-      '--button-bg': 'rgba(240, 145, 118, 0.2)',
-      '--button-hover-bg': 'rgba(240, 145, 118, 0.4)',
-      '--button-active-bg': 'rgba(240, 145, 118, 0.6)'
+      '--app-bg': '#181a1f',
+      '--surface-bg': '#1f2430',
+      '--surface-elevated': '#252b39',
+      '--editor-bg': '#1e1e1e',
+      '--preview-bg': '#1f2430',
+      '--text-color': '#d4d4d4',
+      '--text-muted': '#8b949e',
+      '--k-color-primary': '#569cd6',
+      '--accent-soft': 'rgba(86, 156, 214, 0.18)',
+      '--border-color': 'rgba(255, 255, 255, 0.08)',
+      '--divider-color': 'rgba(255, 255, 255, 0.12)',
+      '--line-number-bg-color': '#1e1e1e',
+      '--line-number-text-color': '#5c6370',
+      '--tooltip-bg-color': '#0d1117',
+      '--tooltip-text-color': '#e6edf3',
+      '--scrollbar-thumb': 'rgba(110, 118, 129, 0.55)',
+      '--scrollbar-track': 'rgba(255, 255, 255, 0.03)',
+      '--button-bg': '#2d333b',
+      '--button-hover-bg': '#39414c',
+      '--button-active-bg': '#454f5d',
+      '--button-border': 'rgba(255, 255, 255, 0.1)',
+      '--input-bg': '#111827',
+      '--input-border': 'rgba(255, 255, 255, 0.12)',
+      '--code-bg': '#11161f',
+      '--inline-code-bg': 'rgba(110, 118, 129, 0.18)',
+      '--blockquote-bg': 'rgba(86, 156, 214, 0.08)',
+      '--blockquote-border': '#569cd6',
+      '--table-header-bg': 'rgba(255, 255, 255, 0.04)',
+      '--shadow-color': 'rgba(0, 0, 0, 0.35)',
+      '--selection-bg': 'rgba(86, 156, 214, 0.2)',
+      '--code-text': '#d4d4d4'
     }
   },
-  'coffee-light': {
-    name: '咖啡色 - 亮色',
+  'vscode-light': {
+    name: 'VS Code - 亮色',
     vars: {
-      '--bg-color': '#EEE9E7',
-      '--line-number-bg-color': '#E6DFDC',
-      '--text-color': '#111',
-      '--k-color-primary': '#D26A4C',
-      '--line-number-text-color': '#555',
-      '--tooltip-bg-color': '#333',
-      '--tooltip-text-color': '#fff',
-      '--scrollbar-thumb': 'rgba(210, 106, 76, 0.5)',
-      '--scrollbar-track': 'rgba(0, 0, 0, 0.1)',
-      '--button-bg': 'rgba(210, 106, 76, 0.2)',
-      '--button-hover-bg': 'rgba(210, 106, 76, 0.3)',
-      '--button-active-bg': 'rgba(210, 106, 76, 0.5)'
+      '--app-bg': '#f3f6fb',
+      '--surface-bg': '#ffffff',
+      '--surface-elevated': '#f7f9fc',
+      '--editor-bg': '#ffffff',
+      '--preview-bg': '#fbfcfe',
+      '--text-color': '#24292f',
+      '--text-muted': '#6b7280',
+      '--k-color-primary': '#0b69c7',
+      '--accent-soft': 'rgba(11, 105, 199, 0.12)',
+      '--border-color': 'rgba(15, 23, 42, 0.09)',
+      '--divider-color': 'rgba(15, 23, 42, 0.12)',
+      '--line-number-bg-color': '#ffffff',
+      '--line-number-text-color': '#94a3b8',
+      '--tooltip-bg-color': '#0f172a',
+      '--tooltip-text-color': '#f8fafc',
+      '--scrollbar-thumb': 'rgba(100, 116, 139, 0.45)',
+      '--scrollbar-track': 'rgba(15, 23, 42, 0.05)',
+      '--button-bg': '#f8fafc',
+      '--button-hover-bg': '#eef2f7',
+      '--button-active-bg': '#e2e8f0',
+      '--button-border': 'rgba(15, 23, 42, 0.1)',
+      '--input-bg': '#ffffff',
+      '--input-border': 'rgba(15, 23, 42, 0.12)',
+      '--code-bg': '#f6f8fa',
+      '--inline-code-bg': 'rgba(2, 6, 23, 0.06)',
+      '--blockquote-bg': 'rgba(11, 105, 199, 0.05)',
+      '--blockquote-border': '#0b69c7',
+      '--table-header-bg': 'rgba(15, 23, 42, 0.04)',
+      '--shadow-color': 'rgba(15, 23, 42, 0.08)',
+      '--selection-bg': 'rgba(11, 105, 199, 0.14)',
+      '--code-text': '#24292f'
     }
   },
-  'ocean-dark': {
-    name: '海洋色 - 暗色',
+  'graphite-dark': {
+    name: 'Graphite - 暗色',
     vars: {
-      '--bg-color': '#1B2B34',
-      '--line-number-bg-color': '#223240',
-      '--text-color': '#D8DEE9',
-      '--k-color-primary': '#6699CC',
-      '--line-number-text-color': '#A7ADBA',
-      '--tooltip-bg-color': '#111',
-      '--tooltip-text-color': '#eee',
-      '--scrollbar-thumb': 'rgba(102, 153, 204, 0.5)',
-      '--scrollbar-track': 'rgba(0, 0, 0, 0.2)',
-      '--button-bg': 'rgba(102, 153, 204, 0.2)',
-      '--button-hover-bg': 'rgba(102, 153, 204, 0.4)',
-      '--button-active-bg': 'rgba(102, 153, 204, 0.6)'
+      '--app-bg': '#111317',
+      '--surface-bg': '#191d24',
+      '--surface-elevated': '#21262f',
+      '--editor-bg': '#161a21',
+      '--preview-bg': '#1a1f27',
+      '--text-color': '#dbe2ea',
+      '--text-muted': '#91a0b3',
+      '--k-color-primary': '#7dd3fc',
+      '--accent-soft': 'rgba(125, 211, 252, 0.16)',
+      '--border-color': 'rgba(255, 255, 255, 0.08)',
+      '--divider-color': 'rgba(125, 211, 252, 0.2)',
+      '--line-number-bg-color': '#161a21',
+      '--line-number-text-color': '#566274',
+      '--tooltip-bg-color': '#0b0d11',
+      '--tooltip-text-color': '#e5edf6',
+      '--scrollbar-thumb': 'rgba(145, 160, 179, 0.45)',
+      '--scrollbar-track': 'rgba(255, 255, 255, 0.04)',
+      '--button-bg': '#232a35',
+      '--button-hover-bg': '#2a3340',
+      '--button-active-bg': '#334051',
+      '--button-border': 'rgba(255, 255, 255, 0.1)',
+      '--input-bg': '#11151c',
+      '--input-border': 'rgba(255, 255, 255, 0.12)',
+      '--code-bg': '#0f141b',
+      '--inline-code-bg': 'rgba(125, 211, 252, 0.12)',
+      '--blockquote-bg': 'rgba(125, 211, 252, 0.08)',
+      '--blockquote-border': '#7dd3fc',
+      '--table-header-bg': 'rgba(255, 255, 255, 0.05)',
+      '--shadow-color': 'rgba(0, 0, 0, 0.3)',
+      '--selection-bg': 'rgba(125, 211, 252, 0.16)',
+      '--code-text': '#dbe2ea'
     }
   },
-  'ocean-light': {
-    name: '海洋色 - 亮色',
+  'paper-light': {
+    name: 'Paper - 浅色',
     vars: {
-      '--bg-color': '#E7EEF4',
-      '--line-number-bg-color': '#D9E2EB',
-      '--text-color': '#1B2B34',
-      '--k-color-primary': '#3B7EA6',
-      '--line-number-text-color': '#65737E',
-      '--tooltip-bg-color': '#333',
-      '--tooltip-text-color': '#fff',
-      '--scrollbar-thumb': 'rgba(59, 126, 166, 0.5)',
-      '--scrollbar-track': 'rgba(0, 0, 0, 0.1)',
-      '--button-bg': 'rgba(59, 126, 166, 0.2)',
-      '--button-hover-bg': 'rgba(59, 126, 166, 0.3)',
-      '--button-active-bg': 'rgba(59, 126, 166, 0.5)'
-    }
-  },
-  'pale-night-dark': {
-    name: '暗夜色 - 暗色',
-    vars: {
-      '--bg-color': '#292D3E',
-      '--line-number-bg-color': '#2E3248',
-      '--text-color': '#D0D0D0',
-      '--k-color-primary': '#C792EA',
-      '--line-number-text-color': '#A7ADBA',
-      '--tooltip-bg-color': '#111',
-      '--tooltip-text-color': '#eee',
-      '--scrollbar-thumb': 'rgba(199, 146, 234, 0.5)',
-      '--scrollbar-track': 'rgba(0, 0, 0, 0.2)',
-      '--button-bg': 'rgba(199, 146, 234, 0.2)',
-      '--button-hover-bg': 'rgba(199, 146, 234, 0.4)',
-      '--button-active-bg': 'rgba(199, 146, 234, 0.6)'
-    }
-  },
-  'solarized-dark': {
-    name: 'Solarized - 暗色',
-    vars: {
-      '--bg-color': '#002B36',
-      '--line-number-bg-color': '#073642',
-      '--text-color': '#839496',
-      '--k-color-primary': '#2AA198',
-      '--line-number-text-color': '#586E75',
-      '--tooltip-bg-color': '#073642',
-      '--tooltip-text-color': '#93A1A1',
-      '--scrollbar-thumb': 'rgba(42, 161, 152, 0.5)',
-      '--scrollbar-track': 'rgba(0, 0, 0, 0.2)',
-      '--button-bg': 'rgba(42, 161, 152, 0.2)',
-      '--button-hover-bg': 'rgba(42, 161, 152, 0.4)',
-      '--button-active-bg': 'rgba(42, 161, 152, 0.6)'
-    }
-  },
-  'solarized-light': {
-    name: 'Solarized - 亮色',
-    vars: {
-      '--bg-color': '#FDF6E3',
-      '--line-number-bg-color': '#EEE8D5',
-      '--text-color': '#657B83',
-      '--k-color-primary': '#2AA198',
-      '--line-number-text-color': '#93A1A1',
-      '--tooltip-bg-color': '#073642',
-      '--tooltip-text-color': '#93A1A1',
-      '--scrollbar-thumb': 'rgba(42, 161, 152, 0.5)',
-      '--scrollbar-track': 'rgba(0, 0, 0, 0.1)',
-      '--button-bg': 'rgba(42, 161, 152, 0.2)',
-      '--button-hover-bg': 'rgba(42, 161, 152, 0.3)',
-      '--button-active-bg': 'rgba(42, 161, 152, 0.5)'
-    }
-  },
-  'winter-dark': {
-    name: '冬季色 - 暗色',
-    vars: {
-      '--bg-color': '#282C34',
-      '--line-number-bg-color': '#21252B',
-      '--text-color': '#ABB2BF',
-      '--k-color-primary': '#56B6C2',
-      '--line-number-text-color': '#636D83',
-      '--tooltip-bg-color': '#111',
-      '--tooltip-text-color': '#eee',
-      '--scrollbar-thumb': 'rgba(86, 182, 194, 0.5)',
-      '--scrollbar-track': 'rgba(0, 0, 0, 0.2)',
-      '--button-bg': 'rgba(86, 182, 194, 0.2)',
-      '--button-hover-bg': 'rgba(86, 182, 194, 0.4)',
-      '--button-active-bg': 'rgba(86, 182, 194, 0.6)'
+      '--app-bg': '#f4efe7',
+      '--surface-bg': '#fffdf9',
+      '--surface-elevated': '#faf5ee',
+      '--editor-bg': '#fffdf9',
+      '--preview-bg': '#fffaf3',
+      '--text-color': '#3a3127',
+      '--text-muted': '#8a7866',
+      '--k-color-primary': '#9d5c2f',
+      '--accent-soft': 'rgba(157, 92, 47, 0.12)',
+      '--border-color': 'rgba(92, 61, 38, 0.12)',
+      '--divider-color': 'rgba(157, 92, 47, 0.18)',
+      '--line-number-bg-color': '#fffdf9',
+      '--line-number-text-color': '#c0ae9a',
+      '--tooltip-bg-color': '#3a3127',
+      '--tooltip-text-color': '#fffaf3',
+      '--scrollbar-thumb': 'rgba(138, 120, 102, 0.45)',
+      '--scrollbar-track': 'rgba(92, 61, 38, 0.05)',
+      '--button-bg': '#f8efe4',
+      '--button-hover-bg': '#f0e3d2',
+      '--button-active-bg': '#e9d6be',
+      '--button-border': 'rgba(92, 61, 38, 0.12)',
+      '--input-bg': '#fffaf3',
+      '--input-border': 'rgba(92, 61, 38, 0.14)',
+      '--code-bg': '#f4ede2',
+      '--inline-code-bg': 'rgba(92, 61, 38, 0.06)',
+      '--blockquote-bg': 'rgba(157, 92, 47, 0.05)',
+      '--blockquote-border': '#9d5c2f',
+      '--table-header-bg': 'rgba(92, 61, 38, 0.05)',
+      '--shadow-color': 'rgba(92, 61, 38, 0.08)',
+      '--selection-bg': 'rgba(157, 92, 47, 0.12)',
+      '--code-text': '#3a3127'
     }
   }
 }
 
-// 状态
+const editorViewportTop = 18
+
 const content = ref('')
 const renderedContent = ref('')
-const currentTheme = ref('pale-night-dark')
+const currentTheme = ref('vscode-dark')
 const syncMode = ref('to-preview')
 const tooltip = ref({ show: false, message: '' })
 const lineNumbersHTML = ref('')
 
-// DOM 引用
 const editor = ref<HTMLTextAreaElement | null>(null)
 const editorScrollContainer = ref<HTMLElement | null>(null)
 const previewScrollContainer = ref<HTMLElement | null>(null)
 const lineNumbers = ref<HTMLElement | null>(null)
 const preview = ref<HTMLElement | null>(null)
 
-// 同步标志
+const lineCount = computed(() => content.value.split('\n').length)
+const wordCount = computed(() => {
+  const matches = content.value.trim().match(/[\u4e00-\u9fa5]|[A-Za-z0-9_]+/g)
+  return matches ? matches.length : 0
+})
+const currentThemeLabel = computed(() => themes[currentTheme.value]?.name ?? '')
+const syncModeLabel = computed(() => {
+  if (syncMode.value === 'to-preview') return '滚动联动到预览区'
+  if (syncMode.value === 'to-editor') return '滚动联动到编辑区'
+  return '滚动独立'
+})
+
 let syncingEditor = false
 let syncingPreview = false
 let scrollMap: number[] = []
 
-// 初始化 markdown-it
 const md = new MarkdownIt({
   html: true,
   breaks: true,
   linkify: true,
-  highlight: function (str, lang) {
+  highlight: (str, lang) => {
     if (lang && hljs.getLanguage(lang)) {
       try {
         return hljs.highlight(str, { language: lang }).value
-      } catch (__) { }
+      } catch (_) {
+      }
     }
-    return '' // use external default escaping
+
+    try {
+      return hljs.highlightAuto(str).value
+    } catch (_) {
+      return MarkdownIt().utils.escapeHtml(str)
+    }
   }
 })
 
-// 注入行号插件
 function injectLineNumbers(tokens: any, idx: any, options: any, env: any, slf: any) {
   const line = tokens[idx].map ? tokens[idx].map[0] : null
   if (line !== null) {
@@ -232,48 +275,36 @@ function injectLineNumbers(tokens: any, idx: any, options: any, env: any, slf: a
   return slf.renderToken(tokens, idx, options, env, slf)
 }
 
+function renderCodeBlock(contentValue: string, languageName: string, line: number | null, enableHighlight = true) {
+  const highlighted = enableHighlight
+    ? (languageName
+      ? (md.options.highlight?.(contentValue, languageName, '') || md.utils.escapeHtml(contentValue))
+      : (md.options.highlight?.(contentValue, '', '') || md.utils.escapeHtml(contentValue)))
+    : md.utils.escapeHtml(contentValue)
+  const languageLabel = md.utils.escapeHtml(languageName || 'plaintext')
+  const lineAttr = line !== null ? ` data-source-line="${line + 1}"` : ''
+  const languageClass = languageName ? `language-${md.utils.escapeHtml(languageName)}` : 'language-plaintext'
+  return `<div class="code-block"${lineAttr}><div class="code-block-header"><span>${languageLabel}</span><span>code</span></div><pre><code class="hljs ${languageClass}">${highlighted}</code></pre></div>\n`
+}
+
 md.renderer.rules.heading_open = injectLineNumbers
 md.renderer.rules.paragraph_open = injectLineNumbers
 md.renderer.rules.list_item_open = injectLineNumbers
 md.renderer.rules.table_open = injectLineNumbers
 md.renderer.rules.blockquote_open = injectLineNumbers
-md.renderer.rules.code_block = (tokens, idx, options, env, slf) => {
+md.renderer.rules.code_block = (tokens, idx) => {
   const line = tokens[idx].map ? tokens[idx].map[0] : null
-  if (line !== null) {
-    return `<pre data-source-line="${line + 1}"><code>${md.utils.escapeHtml(tokens[idx].content)}</code></pre>\n`
-  }
-  return `<pre><code>${md.utils.escapeHtml(tokens[idx].content)}</code></pre>\n`
+  return renderCodeBlock(tokens[idx].content, '', line, false)
 }
-md.renderer.rules.fence = (tokens, idx, options, env, slf) => {
+md.renderer.rules.fence = (tokens, idx) => {
   const token = tokens[idx]
   const info = token.info ? md.utils.unescapeAll(token.info).trim() : ''
-  let langName = ''
-  let highlighted
-
-  if (info) {
-    langName = info.split(/\s+/g)[0]
-  }
-
-  if (options.highlight) {
-    highlighted = options.highlight(token.content, langName, '') || md.utils.escapeHtml(token.content)
-  } else {
-    highlighted = md.utils.escapeHtml(token.content)
-  }
-
+  const languageName = info ? info.split(/\s+/g)[0] : ''
   const line = token.map ? token.map[0] : null
-  const lineAttr = line !== null ? ` data-source-line="${line + 1}"` : ''
-
-  if (highlighted.indexOf('<pre') === 0) {
-    return highlighted.replace('<pre', `<pre${lineAttr}`)
-  }
-
-  return `<pre${lineAttr}><code${langName ? ` class="${options.langPrefix}${langName}"` : ''}>${highlighted}</code></pre>\n`
+  return renderCodeBlock(token.content, languageName, line)
 }
 
-
-// 初始化
 onMounted(() => {
-  // 加载保存的设置
   const savedTheme = localStorage.getItem('markdown-editor-theme')
   if (savedTheme && themes[savedTheme]) {
     currentTheme.value = savedTheme
@@ -285,20 +316,16 @@ onMounted(() => {
   }
 
   const savedContent = localStorage.getItem('markdown-editor-content')
-  content.value = savedContent || '# Markdown 编辑预览器\n\n欢迎使用 Markdown 编辑预览器！这是一个简单的示例。\n\n## 特性\n\n- 实时预览\n- 语法高亮\n- 数学公式支持\n- 多种主题\n\n## 语法示例\n\n### 代码块\n\n```javascript\nfunction hello() {\n  console.log("Hello, world!");\n}\n```\n\n### 表格\n\n| 名称 | 描述 |\n| --- | --- |\n| Markdown | 轻量级标记语言 |\n| KaTeX | 数学公式渲染 |\n\n### 数学公式\n\n行内公式: $E=mc^2$\n\n行间公式:\n\n$\\frac{d}{dx}\\left( \\int_{0}^{x} f(u)\\,du\\right)=f(x)$\n\n### 引用\n\n> 这是一个引用示例。\n> \n> — 某人\n\n### 任务列表\n\n- [x] 已完成任务\n- [ ] 未完成任务\n\n'
+  content.value = savedContent || '# Markdown 编辑预览器\n\n欢迎使用 Markdown 编辑预览器。这个版本重点强化了 VS Code 风格的双栏布局、代码块视觉和更清晰的排版。\n\n## 特性\n\n- 实时预览\n- 代码块高亮与语言标签\n- 数学公式支持\n- 更明显的分隔与状态信息\n\n## 语法示例\n\n### 代码块\n\n```ts\nfunction greet(name: string) {\n  console.log(`Hello, ${name}`)\n}\n\ngreet("world")\n```\n\n### 表格\n\n| 名称 | 描述 |\n| --- | --- |\n| Markdown | 轻量级标记语言 |\n| KaTeX | 数学公式渲染 |\n| highlight.js | 代码高亮 |\n\n### 数学公式\n\n行内公式: $E=mc^2$\n\n行间公式:\n\n$\\frac{d}{dx}\\left( \\int_{0}^{x} f(u)\\,du\\right)=f(x)$\n\n### 分隔线\n\n---\n\n### 引用\n\n> 现在的预览区会更像一个真正的编辑器预览面板，而不是简单把 HTML 堆出来。\n\n### 任务列表\n\n- [x] 已完成任务\n- [ ] 未完成任务\n'
 
   applyTheme(currentTheme.value)
   updateLineNumbers()
   renderMarkdown()
   adjustTextareaHeight()
 
-  // 监听键盘快捷键
   document.addEventListener('keydown', handleKeydown)
-
-  // 监听窗口大小变化
   window.addEventListener('resize', handleResize)
 
-  // 初始构建滚动映射 (延迟以确保渲染完成)
   setTimeout(() => {
     buildScrollMap()
   }, 500)
@@ -309,7 +336,6 @@ onUnmounted(() => {
   window.removeEventListener('resize', handleResize)
 })
 
-// 监听变化
 watch(currentTheme, (newTheme) => {
   applyTheme(newTheme)
   localStorage.setItem('markdown-editor-theme', newTheme)
@@ -328,16 +354,14 @@ watch(content, () => {
   saveContentToStorage()
 })
 
-// 方法
 const handleInput = () => {
-  // 触发 watch
 }
 
 const updateLineNumbers = () => {
   const lines = content.value.split('\n')
   let html = ''
   for (let i = 0; i < lines.length; i++) {
-    html += (i + 1) + '<br>'
+    html += `${i + 1}<br>`
   }
   lineNumbersHTML.value = html
 }
@@ -346,23 +370,22 @@ const renderMarkdown = () => {
   renderedContent.value = md.render(content.value)
 
   nextTick(() => {
-    if (preview.value) {
-      renderMathInElement(preview.value, {
-        delimiters: [
-          { left: '$', right: '$', display: true },
-          { left: '$', right: '$', display: false }
-        ],
-        throwOnError: false
-      })
+    if (!preview.value) return
 
-      // 监听图片加载
-      const images = preview.value.querySelectorAll('img')
-      images.forEach(img => {
-        img.addEventListener('load', buildScrollMap)
-      })
+    renderMathInElement(preview.value, {
+      delimiters: [
+        { left: '$', right: '$', display: true },
+        { left: '$', right: '$', display: false }
+      ],
+      throwOnError: false
+    })
 
-      buildScrollMap()
-    }
+    const images = preview.value.querySelectorAll('img')
+    images.forEach(img => {
+      img.addEventListener('load', buildScrollMap)
+    })
+
+    buildScrollMap()
   })
 }
 
@@ -378,7 +401,7 @@ const adjustTextareaHeight = () => {
   const currentScrollLeft = editorScrollContainer.value.scrollLeft
 
   editor.value.style.height = 'auto'
-  editor.value.style.height = (editor.value.scrollHeight) + 'px'
+  editor.value.style.height = `${editor.value.scrollHeight}px`
 
   editorScrollContainer.value.scrollTop = currentScrollTop
   editorScrollContainer.value.scrollLeft = currentScrollLeft
@@ -386,37 +409,33 @@ const adjustTextareaHeight = () => {
 
 const applyTheme = (themeName: string) => {
   const theme = themes[themeName]
-  if (theme) {
-    Object.keys(theme.vars).forEach(key => {
-      document.documentElement.style.setProperty(key, theme.vars[key])
-    })
+  if (!theme) return
 
-    document.body.classList.remove('theme-light', 'theme-dark')
-    if (themeName.includes('light')) {
-      document.body.classList.add('theme-light')
-    } else {
-      document.body.classList.add('theme-dark')
-    }
+  Object.keys(theme.vars).forEach(key => {
+    document.documentElement.style.setProperty(key, theme.vars[key])
+  })
+
+  document.body.classList.remove('theme-light', 'theme-dark')
+  if (themeName.includes('light')) {
+    document.body.classList.add('theme-light')
+  } else {
+    document.body.classList.add('theme-dark')
   }
 }
 
-// 获取编辑器行高
 const getEditorLineHeight = () => {
-  if (!editor.value) return 22.4
+  if (!editor.value) return 25.2
   const computedStyle = window.getComputedStyle(editor.value)
   const lineHeight = parseFloat(computedStyle.lineHeight)
-  return isNaN(lineHeight) ? 22.4 : lineHeight
+  return isNaN(lineHeight) ? 25.2 : lineHeight
 }
 
-// 构建滚动映射
 const buildScrollMap = () => {
   if (!editor.value || !preview.value) return
 
   const lines = content.value.split('\n')
-  const _scrollMap: number[] = []
+  const nextScrollMap: number[] = []
   const nonEmptyList: number[] = []
-
-  // 查找所有带有 data-source-line 的元素
   const elements = preview.value.querySelectorAll('[data-source-line]')
   const offsetMap: Record<number, number> = {}
 
@@ -433,12 +452,11 @@ const buildScrollMap = () => {
       pos = offsetMap[i + 1]
       nonEmptyList.push(i)
     }
-    _scrollMap.push(pos)
+    nextScrollMap.push(pos)
   }
 
-  // 填充空缺
   nonEmptyList.push(lines.length)
-  _scrollMap.push(preview.value.scrollHeight)
+  nextScrollMap.push(preview.value.scrollHeight)
 
   let posIndex = 0
   for (let i = 0; i < lines.length; i++) {
@@ -449,20 +467,19 @@ const buildScrollMap = () => {
 
     const startLine = nonEmptyList[posIndex - 1]
     const endLine = nonEmptyList[posIndex]
-    const startPos = _scrollMap[startLine]
-    const endPos = _scrollMap[endLine]
+    const startPos = nextScrollMap[startLine]
+    const endPos = nextScrollMap[endLine]
 
-    _scrollMap[i] = startPos + (endPos - startPos) * (i - startLine) / (endLine - startLine)
+    nextScrollMap[i] = startPos + (endPos - startPos) * (i - startLine) / (endLine - startLine)
   }
 
-  scrollMap = _scrollMap
+  scrollMap = nextScrollMap
 }
 
 const handleEditorScroll = () => {
   if (!editorScrollContainer.value || !lineNumbers.value) return
 
-  // 同步行号
-  lineNumbers.value.style.top = (20 - editorScrollContainer.value.scrollTop) + 'px'
+  lineNumbers.value.style.top = `${editorViewportTop - editorScrollContainer.value.scrollTop}px`
 
   if (!syncingEditor && syncMode.value === 'to-preview' && previewScrollContainer.value && editor.value) {
     syncingPreview = true
@@ -471,11 +488,9 @@ const handleEditorScroll = () => {
     const scrollTop = editorScrollContainer.value.scrollTop
     const lineIndex = Math.floor(scrollTop / lineHeight)
 
-    if (scrollMap && scrollMap.length > lineIndex) {
-      const targetScrollTop = scrollMap[lineIndex]
-      // 平滑滚动
+    if (scrollMap.length > lineIndex) {
       previewScrollContainer.value.scrollTo({
-        top: targetScrollTop,
+        top: scrollMap[lineIndex],
         behavior: 'auto'
       })
     }
@@ -487,8 +502,6 @@ const handleEditorScroll = () => {
 }
 
 const handleTextareaScroll = () => {
-  // 确保 textarea 滚动时容器也滚动（如果需要）
-  // 这里主要是为了处理 textarea 高度变化的情况
 }
 
 const handlePreviewScroll = () => {
@@ -498,8 +511,6 @@ const handlePreviewScroll = () => {
     syncingEditor = true
 
     const scrollTop = previewScrollContainer.value.scrollTop
-
-    // 查找对应的行
     let lineIndex = 0
     for (let i = 0; i < scrollMap.length; i++) {
       if (scrollMap[i] > scrollTop) {
@@ -537,7 +548,6 @@ const exportMarkdown = () => {
 
   const blob = new Blob([content.value], { type: 'text/markdown' })
   const url = URL.createObjectURL(blob)
-
   const now = new Date()
   const year = now.getFullYear()
   const month = String(now.getMonth() + 1).padStart(2, '0')
@@ -573,5 +583,4 @@ const handleKeydown = (e: KeyboardEvent) => {
 </script>
 
 <style scoped>
-/* 样式已迁移到 style.scss */
 </style>
