@@ -138,6 +138,16 @@
       <button class="context-menu-item" type="button" @click="beginRenameFromContext">Rename File</button>
       <button class="context-menu-item danger" type="button" @click="deleteContextFile">Delete File</button>
     </div>
+
+    <div
+      v-if="editorContextMenu.visible"
+      class="context-menu"
+      :style="{ left: `${editorContextMenu.x}px`, top: `${editorContextMenu.y}px` }"
+    >
+      <button class="context-menu-item" type="button" @click="copyFromEditor">Copy</button>
+      <button class="context-menu-item" type="button" @click="pasteIntoEditor">Paste</button>
+      <button class="context-menu-item" type="button" @click="cutFromEditor">Cut</button>
+    </div>
   </main>
 </template>
 

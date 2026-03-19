@@ -104,6 +104,11 @@ const contextMenu = ref({
   y: 0,
   fileId: ''
 })
+const editorContextMenu = ref({
+  visible: false,
+  x: 0,
+  y: 0
+})
 const middleScrollState = ref<{
   target: 'editor' | 'preview'
   startY: number
@@ -171,6 +176,49 @@ function renderCodeBlock(source: string, language: string, line: number | null, 
   const languageLabel = language ? escapeHtml(language) : 'plaintext'
 
   return `<div class="code-block"${lineAttr}><div class="code-block-header">${languageLabel}</div><pre><code class="hljs ${languageClass}">${html}</code></pre></div>\n`
+}
+
+function enhanceTaskListTokens(state: any) {
+  const tokens = state.tokens as any[]
+
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index]
+    if (token.type !== 'list_item_open') continue
+
+    let inlineToken: any = null
+    for (let cursor = index + 1; cursor < tokens.length; cursor += 1) {
+      const current = tokens[cursor]
+      if (current.type === 'list_item_close') break
+      if (current.type === 'inline') {
+        inlineToken = current
+        break
+      }
+    }
+
+    if (!inlineToken || typeof inlineToken.content !== 'string') continue
+
+    const match = inlineToken.content.match(/^\[( |x|X)\]\s+/)
+    if (!match) continue
+
+    const checked = /x/i.test(match[1])
+    token.attrJoin('class', 'task-list-item')
+    inlineToken.content = inlineToken.content.slice(match[0].length)
+
+    const checkboxToken = new state.Token('html_inline', '', 0)
+    checkboxToken.content = `<span class="task-list-checkbox${checked ? ' is-checked' : ''}" aria-hidden="true"></span>`
+
+    if (!Array.isArray(inlineToken.children) || inlineToken.children.length === 0) {
+      inlineToken.children = [checkboxToken]
+      continue
+    }
+
+    const firstTextToken = inlineToken.children.find((child: any) => child.type === 'text' && typeof child.content === 'string')
+    if (firstTextToken) {
+      firstTextToken.content = firstTextToken.content.replace(/^\[( |x|X)\]\s+/, '')
+    }
+
+    inlineToken.children.unshift(checkboxToken)
+  }
 }
 
 function openDatabase() {
@@ -343,6 +391,7 @@ function createEditor() {
     lineHeight: 22,
     roundedSelection: false,
     readOnly: true,
+    contextmenu: false,
     scrollbar: {
       vertical: 'visible',
       horizontal: 'hidden',
@@ -377,6 +426,18 @@ function createEditor() {
 
   editorInstance.value.onDidScrollChange(() => {
     handleEditorScroll()
+  })
+
+  editorInstance.value.onContextMenu((event: monaco.editor.IEditorMouseEvent) => {
+    if (!editorInstance.value) return
+
+    const position = event.target.position
+    if (position) {
+      editorInstance.value.setPosition(position)
+    }
+
+    editorInstance.value.focus()
+    openEditorContextMenu(event.event.browserEvent)
   })
 }
 
@@ -509,17 +570,6 @@ function renderMarkdownNow(version: number) {
   nextTick(() => {
     if (version !== renderVersion) return
     if (!preview.value) return
-
-    preview.value.querySelectorAll('li').forEach((item) => {
-      const html = item.innerHTML
-      const unchecked = html.match(/^\s*\[\s\]\s*/)
-      const checked = html.match(/^\s*\[(x|X)\]\s*/)
-
-      if (!unchecked && !checked) return
-
-      item.classList.add('task-list-item')
-      item.innerHTML = `${checked ? '<span class="task-list-checkbox is-checked" aria-hidden="true"></span>' : '<span class="task-list-checkbox" aria-hidden="true"></span>'}${html.replace(/^\s*\[( |x|X)\]\s*/, '')}`
-    })
 
     renderMathInElement(preview.value, {
       delimiters: [
@@ -704,6 +754,7 @@ function openProjectLink() {
 }
 
 function openFileContextMenu(event: MouseEvent, fileId: string) {
+  closeEditorContextMenu()
   contextMenu.value = {
     visible: true,
     x: event.clientX,
@@ -714,6 +765,19 @@ function openFileContextMenu(event: MouseEvent, fileId: string) {
 
 function closeContextMenu() {
   contextMenu.value.visible = false
+}
+
+function openEditorContextMenu(event: MouseEvent) {
+  closeContextMenu()
+  editorContextMenu.value = {
+    visible: true,
+    x: event.clientX,
+    y: event.clientY
+  }
+}
+
+function closeEditorContextMenu() {
+  editorContextMenu.value.visible = false
 }
 
 function startRenameFile(fileId: string) {
@@ -778,6 +842,77 @@ function handleGlobalPointerDown(event: MouseEvent) {
   const target = event.target as HTMLElement | null
   if (target?.closest('.context-menu')) return
   closeContextMenu()
+  closeEditorContextMenu()
+}
+
+function getEditorSelectionText() {
+  if (!editorInstance.value) return ''
+  const selection = editorInstance.value.getSelection()
+  if (!selection || selection.isEmpty()) return ''
+  const model = editorInstance.value.getModel()
+  return model?.getValueInRange(selection) ?? ''
+}
+
+async function copyFromEditor() {
+  const selectedText = getEditorSelectionText()
+  if (!selectedText) {
+    closeEditorContextMenu()
+    return
+  }
+
+  try {
+    await navigator.clipboard.writeText(selectedText)
+  } catch {
+    editorInstance.value?.trigger('editor-context-menu', 'editor.action.clipboardCopyAction', null)
+  }
+  closeEditorContextMenu()
+}
+
+async function cutFromEditor() {
+  if (!editorInstance.value) return
+
+  const selection = editorInstance.value.getSelection()
+  const selectedText = getEditorSelectionText()
+  if (!selection || selection.isEmpty() || !selectedText) {
+    closeEditorContextMenu()
+    return
+  }
+
+  try {
+    await navigator.clipboard.writeText(selectedText)
+    editorInstance.value.executeEdits('editor-context-cut', [{
+      range: selection,
+      text: '',
+      forceMoveMarkers: true
+    }])
+  } catch {
+    editorInstance.value.trigger('editor-context-menu', 'editor.action.clipboardCutAction', null)
+  }
+  closeEditorContextMenu()
+}
+
+async function pasteIntoEditor() {
+  if (!editorInstance.value) return
+
+  try {
+    const clipboardText = await navigator.clipboard.readText()
+    const selection = editorInstance.value.getSelection()
+    if (!selection) {
+      closeEditorContextMenu()
+      return
+    }
+
+    editorInstance.value.executeEdits('editor-context-paste', [{
+      range: selection,
+      text: clipboardText,
+      forceMoveMarkers: true
+    }])
+    editorInstance.value.focus()
+  } catch {
+    editorInstance.value.trigger('editor-context-menu', 'editor.action.clipboardPasteAction', null)
+  } finally {
+    closeEditorContextMenu()
+  }
 }
 
 function handlePointerMove(event: MouseEvent) {
@@ -852,6 +987,7 @@ md.renderer.rules.paragraph_open = injectLineNumbers
 md.renderer.rules.list_item_open = injectLineNumbers
 md.renderer.rules.table_open = injectLineNumbers
 md.renderer.rules.blockquote_open = injectLineNumbers
+md.core.ruler.after('inline', 'task-list-items', enhanceTaskListTokens)
 md.renderer.rules.code_block = (tokens: any[], idx: number) => {
   const line = tokens[idx].map ? tokens[idx].map[0] : null
   return renderCodeBlock(tokens[idx].content, '', line, false)
@@ -932,8 +1068,12 @@ watch(titleText, (value) => {
       cursorStatus,
       lineCount,
       contextMenu,
+      editorContextMenu,
       beginRenameFromContext,
       deleteContextFile,
+      copyFromEditor,
+      pasteIntoEditor,
+      cutFromEditor,
       startSidebarResize,
       saveAndCloseCurrentFile,
       openProjectLink,
