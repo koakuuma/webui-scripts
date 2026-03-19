@@ -1,12 +1,16 @@
 <template>
-  <div class="app-container">
+  <div ref="appContainerRef" class="app-container">
     <!-- 顶部栏 -->
     <div class="top-bar">
       <div class="app-title">{{ currentTabName }}</div>
       <div class="top-actions">
-        <button class="icon-btn" v-if="currentTab === 'alarm'" @click="openModal()">+</button>
+        <template v-if="currentTab === 'alarm' && isSelectionMode">
+          <button class="icon-btn text-action-btn" :disabled="selectedAlarmIds.length === 0" @click="promptBatchDelete">删除</button>
+          <button class="icon-btn text-action-btn" @click="cancelSelectionMode">取消</button>
+        </template>
+        <button class="icon-btn" v-else-if="currentTab === 'alarm'" @click="openModal()">+</button>
         <button class="icon-btn text-action-btn" v-if="currentTab === 'world-clock'" @click="openTimezoneModal">UTC</button>
-        <button class="icon-btn" @click="openProjectRepo">⋮</button>
+        <button class="icon-btn" v-if="!isSelectionMode" @click="openProjectRepo">⋮</button>
       </div>
     </div>
 
@@ -23,8 +27,16 @@
           <span style="color: var(--accent-color)">开启</span>
         </div>
 
-        <ul class="alarm-list">
-          <li v-for="alarm in sortedAlarms" :key="alarm.id" class="alarm-card" @click="editAlarm(alarm)">
+        <div v-if="sortedAlarms.length === 0" class="empty-state">
+          <div class="empty-state-title">暂无闹钟</div>
+          <div class="empty-state-desc">点击右上角 + 添加一个新的闹钟</div>
+        </div>
+
+        <ul v-else class="alarm-list">
+          <li v-for="alarm in sortedAlarms" :key="alarm.id" class="alarm-card"
+            :class="{ 'selection-mode': isSelectionMode, selected: isAlarmSelected(alarm.id) }"
+            @click="handleAlarmCardClick(alarm)"
+            @contextmenu.prevent="openAlarmContextMenu($event, alarm)">
             <div class="alarm-info">
               <span class="alarm-time" :class="{ active: alarm.enabled }">{{ alarm.time }}</span>
               <div class="alarm-meta-row">
@@ -32,10 +44,13 @@
                 <span v-if="isAlarmSnoozed(alarm)" class="alarm-snooze-badge">{{ getSnoozeBadgeText(alarm) }}</span>
               </div>
             </div>
-            <label class="switch" @click.stop>
+            <label v-if="!isSelectionMode" class="switch" @click.stop>
               <input type="checkbox" :checked="alarm.enabled" @change="toggleAlarm(alarm.id, $event)">
               <span class="slider"></span>
             </label>
+            <button v-else class="selection-indicator" :class="{ selected: isAlarmSelected(alarm.id) }" @click.stop="toggleSelectedAlarm(alarm.id)">
+              <span v-if="isAlarmSelected(alarm.id)">✓</span>
+            </button>
           </li>
         </ul>
       </div>
@@ -389,9 +404,17 @@
     <!-- 删除确认弹框 -->
     <div v-if="isDeleteConfirmActive" class="dialog-overlay" @click.self="isDeleteConfirmActive = false">
       <div class="dialog-box">
-        <div class="dialog-title">确定删除此闹钟吗？</div>
+        <div class="dialog-title">{{ deleteDialogTitle }}</div>
         <button class="dialog-confirm danger" @click="confirmDeleteAlarm">删除</button>
         <button class="dialog-cancel-text" @click="isDeleteConfirmActive = false">取消</button>
+      </div>
+    </div>
+
+    <div v-if="contextMenu.visible" class="context-menu-overlay" @click="closeAlarmContextMenu">
+      <div class="context-menu" :style="{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }" @click.stop>
+        <button class="context-menu-item" @click="editAlarmFromContextMenu">编辑闹钟</button>
+        <button class="context-menu-item danger" @click="promptDeleteFromContextMenu">删除闹钟</button>
+        <button class="context-menu-item" @click="enterSelectionModeFromContextMenu">多选闹钟</button>
       </div>
     </div>
 
@@ -471,12 +494,17 @@ const isDatePickerActive = ref(false)
 const isTimezoneModalActive = ref(false)
 const isLabelModalActive = ref(false)
 const isDeleteConfirmActive = ref(false)
+const isSelectionMode = ref(false)
 const labelInputTemp = ref('')
 const editingId = ref<string | null>(null)
 const nextAlarmTip = ref('')
 const currentTick = ref(Date.now())
 const snoozeAlarmId = ref<string | null>(null)
 const currentTimezoneOffset = ref(8)
+const selectedAlarmIds = ref<string[]>([])
+const deleteTargetIds = ref<string[]>([])
+const appContainerRef = ref<HTMLElement | null>(null)
+const contextMenu = reactive({ visible: false, x: 0, y: 0, alarmId: null as string | null })
 
 // 当前系统通知对应的状态，用于处理 SW 回调与稍后提醒
 const activeNotification = ref<{ alarm: Alarm; snoozeRemaining: number } | null>(null)
@@ -561,6 +589,11 @@ watch([selectedYear, selectedMonth], () => {
   }
 })
 
+watch(currentTab, (tab) => {
+  closeAlarmContextMenu()
+  if (tab !== 'alarm') cancelSelectionMode()
+})
+
 // 时钟相关
 const currentTimeStr = ref('')
 const currentDateStr = ref('')
@@ -590,6 +623,10 @@ let clockInterval: number | null = null
 
 // 计算属性
 const currentTabName = computed(() => {
+  if (currentTab.value === 'alarm' && isSelectionMode.value) {
+    return `已选 ${selectedAlarmIds.value.length}`
+  }
+
   const map: Record<Tab, string> = {
     'alarm': '闹钟',
     'world-clock': '世界时钟',
@@ -600,6 +637,9 @@ const currentTabName = computed(() => {
 })
 
 const currentTimezoneLabel = computed(() => formatUtcOffset(currentTimezoneOffset.value))
+const deleteDialogTitle = computed(() => deleteTargetIds.value.length > 1
+  ? `确定删除已选择的 ${deleteTargetIds.value.length} 个闹钟吗？`
+  : '确定删除此闹钟吗？')
 
 const sortedAlarms = computed(() => {
   return [...alarms.value].sort((a, b) => a.time.localeCompare(b.time))
@@ -1123,6 +1163,7 @@ const toggleDay = (day: number) => {
 
 const saveAlarm = () => {
   if (!form.time) return
+  closeAlarmContextMenu()
 
   const alarmData = {
     time: form.time,
@@ -1160,33 +1201,34 @@ const saveAlarm = () => {
 }
 
 const confirmDeleteAlarm = () => {
-  if (editingId.value) {
-    alarms.value = alarms.value.filter(a => a.id !== editingId.value)
-    saveToStorage()
-    isDeleteConfirmActive.value = false
-    closeModal()
-    updateNextAlarmTip()
-  }
-}
+  const idsToDelete = deleteTargetIds.value.length > 0
+    ? [...deleteTargetIds.value]
+    : (editingId.value ? [editingId.value] : [])
 
-// 旧名存留备用
-const deleteCurrentAlarm = confirmDeleteAlarm
+  if (idsToDelete.length === 0) return
+
+  idsToDelete.forEach(resetSnoozeStateForAlarm)
+  alarms.value = alarms.value.filter(a => !idsToDelete.includes(a.id))
+  saveToStorage()
+  isDeleteConfirmActive.value = false
+  deleteTargetIds.value = []
+
+  if (editingId.value && idsToDelete.includes(editingId.value)) {
+    closeModal()
+  }
+
+  if (isSelectionMode.value) {
+    cancelSelectionMode()
+  }
+
+  updateNextAlarmTip()
+}
 
 const toggleAlarm = (id: string, event: Event) => {
   const checked = (event.target as HTMLInputElement).checked
   const alarm = alarms.value.find(a => a.id === id)
   if (alarm) {
-    if (snoozeAlarmId.value === alarm.id) {
-      if (snoozeTimeoutId) {
-        clearTimeout(snoozeTimeoutId)
-        snoozeTimeoutId = null
-      }
-      if (activeNotification.value?.alarm.id === alarm.id) {
-        activeNotification.value = null
-      }
-      snoozeAlarmFireTime = null
-      snoozeAlarmId.value = null
-    }
+    resetSnoozeStateForAlarm(alarm.id)
 
     alarm.enabled = checked
     alarm.lastTriggered = checked ? getCurrentMinuteTriggerMark(alarm) : null
@@ -1318,6 +1360,90 @@ const selectTimezoneOffset = (offset: number) => {
 
 const openProjectRepo = () => {
   window.open('https://github.com/koakuuma/webui-scripts/', '_blank', 'noopener,noreferrer')
+}
+
+const closeAlarmContextMenu = () => {
+  contextMenu.visible = false
+  contextMenu.alarmId = null
+}
+
+const openAlarmContextMenu = (event: MouseEvent, alarm: Alarm) => {
+  closeAlarmContextMenu()
+  const containerRect = appContainerRef.value?.getBoundingClientRect()
+  if (!containerRect) return
+
+  const menuWidth = 180
+  const menuHeight = 154
+  contextMenu.x = Math.max(12, Math.min(event.clientX - containerRect.left, containerRect.width - menuWidth - 12))
+  contextMenu.y = Math.max(12, Math.min(event.clientY - containerRect.top, containerRect.height - menuHeight - 12))
+  contextMenu.visible = true
+  contextMenu.alarmId = alarm.id
+}
+
+const getContextMenuAlarm = () => alarms.value.find(a => a.id === contextMenu.alarmId) || null
+
+const isAlarmSelected = (alarmId: string) => selectedAlarmIds.value.includes(alarmId)
+
+const toggleSelectedAlarm = (alarmId: string) => {
+  const index = selectedAlarmIds.value.indexOf(alarmId)
+  if (index === -1) selectedAlarmIds.value.push(alarmId)
+  else selectedAlarmIds.value.splice(index, 1)
+}
+
+const cancelSelectionMode = () => {
+  isSelectionMode.value = false
+  selectedAlarmIds.value = []
+}
+
+const handleAlarmCardClick = (alarm: Alarm) => {
+  if (isSelectionMode.value) {
+    toggleSelectedAlarm(alarm.id)
+    return
+  }
+  editAlarm(alarm)
+}
+
+const editAlarmFromContextMenu = () => {
+  const alarm = getContextMenuAlarm()
+  if (!alarm) return
+  closeAlarmContextMenu()
+  editAlarm(alarm)
+}
+
+const enterSelectionModeFromContextMenu = () => {
+  const alarm = getContextMenuAlarm()
+  if (!alarm) return
+  isSelectionMode.value = true
+  selectedAlarmIds.value = [alarm.id]
+  closeAlarmContextMenu()
+}
+
+const promptDeleteFromContextMenu = () => {
+  const alarm = getContextMenuAlarm()
+  if (!alarm) return
+  deleteTargetIds.value = [alarm.id]
+  isDeleteConfirmActive.value = true
+  closeAlarmContextMenu()
+}
+
+const promptBatchDelete = () => {
+  if (selectedAlarmIds.value.length === 0) return
+  deleteTargetIds.value = [...selectedAlarmIds.value]
+  isDeleteConfirmActive.value = true
+}
+
+const resetSnoozeStateForAlarm = (alarmId: string) => {
+  if (snoozeAlarmId.value !== alarmId) return
+
+  if (snoozeTimeoutId) {
+    clearTimeout(snoozeTimeoutId)
+    snoozeTimeoutId = null
+  }
+  if (activeNotification.value?.alarm.id === alarmId) {
+    activeNotification.value = null
+  }
+  snoozeAlarmFireTime = null
+  snoozeAlarmId.value = null
 }
 
 const getCurrentMinuteTriggerMark = (alarm: Pick<Alarm, 'time' | 'repeatMode' | 'days' | 'specificDate'>) => {
