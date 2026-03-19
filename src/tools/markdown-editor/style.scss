@@ -1,3 +1,6 @@
+@import url("https://cdn.jsdelivr.net/npm/@fontsource/cascadia-code@5.1.1/400.css");
+@import url("https://cdn.jsdelivr.net/npm/@fontsource/cascadia-code@5.1.1/600.css");
+
 :root {
   --app-bg: #181a1f;
   --surface-bg: #1f2430;
@@ -22,7 +25,7 @@
   --button-border: rgba(255, 255, 255, 0.1);
   --input-bg: #111827;
   --input-border: rgba(255, 255, 255, 0.12);
-  --code-bg: #11161f;
+  --code-bg: #0c111b;
   --inline-code-bg: rgba(110, 118, 129, 0.18);
   --blockquote-bg: rgba(86, 156, 214, 0.08);
   --blockquote-border: #569cd6;
@@ -36,8 +39,6 @@
   box-sizing: border-box;
   margin: 0;
   padding: 0;
-  scrollbar-width: thin;
-  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
 }
 
 html,
@@ -100,11 +101,6 @@ body {
   font-size: 1.25rem;
   font-weight: 700;
   letter-spacing: 0.01em;
-}
-
-.subtitle {
-  font-size: 13px;
-  color: var(--text-muted);
 }
 
 .controls {
@@ -270,6 +266,13 @@ body {
   flex: 1;
   min-height: 0;
   overflow: auto;
+  scrollbar-width: none;
+}
+
+.editor-scroll-container::-webkit-scrollbar,
+.preview-scroll-container::-webkit-scrollbar,
+#preview :deep(pre)::-webkit-scrollbar {
+  display: none;
 }
 
 .editor-scroll-container {
@@ -290,7 +293,7 @@ body {
   resize: none;
   overflow: visible;
   outline: none;
-  font-family: "Cascadia Code", Consolas, monospace;
+  font-family: "Cascadia Code", "Cascadia Mono", Consolas, monospace;
   font-size: 14px;
   line-height: 1.8;
   caret-color: var(--k-color-primary);
@@ -308,7 +311,7 @@ body {
   padding-right: 12px;
   color: var(--line-number-text-color);
   background: linear-gradient(90deg, var(--line-number-bg-color), transparent 92%);
-  font-family: "Cascadia Code", Consolas, monospace;
+  font-family: "Cascadia Code", "Cascadia Mono", Consolas, monospace;
   font-size: 14px;
   line-height: 1.8;
   text-align: right;
@@ -401,7 +404,7 @@ body {
   border-radius: 6px;
   background: var(--inline-code-bg);
   color: var(--code-text);
-  font-family: "Cascadia Code", Consolas, monospace;
+  font-family: "Cascadia Code", "Cascadia Mono", Consolas, monospace;
   font-size: 0.92em;
 }
 
@@ -410,21 +413,7 @@ body {
   border-radius: 14px;
   overflow: hidden;
   background: var(--code-bg);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
-}
-
-#preview :deep(.code-block-header) {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px 14px;
-  border-bottom: 1px solid var(--border-color);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), transparent);
-  color: var(--text-muted);
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02);
 }
 
 #preview :deep(pre) {
@@ -432,6 +421,7 @@ body {
   padding: 16px 18px;
   overflow: auto;
   background: transparent;
+  scrollbar-width: none;
 }
 
 #preview :deep(pre code) {
@@ -440,6 +430,7 @@ body {
   background: transparent;
   font-size: 13.5px;
   line-height: 1.7;
+  font-family: "Cascadia Code", "Cascadia Mono", Consolas, monospace;
 }
 
 #preview :deep(.hljs) {

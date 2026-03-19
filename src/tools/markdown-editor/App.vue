@@ -3,7 +3,6 @@
     <div class="header">
       <div class="title-group">
         <div class="title">Markdown 编辑预览器</div>
-        <div class="subtitle">更接近 VS Code 的双栏编辑与实时渲染体验</div>
       </div>
       <div class="controls">
         <div class="sync-control">
@@ -41,7 +40,6 @@
       <section class="pane preview-pane">
         <div class="pane-toolbar">
           <span class="pane-label">预览</span>
-          <span class="pane-meta">{{ currentThemeLabel }}</span>
         </div>
         <div class="preview-scroll-container" ref="previewScrollContainer" @scroll="handlePreviewScroll">
           <article id="preview" ref="preview" class="markdown-preview" v-html="renderedContent"></article>
@@ -51,7 +49,6 @@
     <div class="status-bar">
       <span>{{ lineCount }} 行</span>
       <span>{{ wordCount }} 词</span>
-      <span>{{ syncModeLabel }}</span>
     </div>
   </div>
   <div class="tooltip" :class="{ show: tooltip.show }">{{ tooltip.message }}</div>
@@ -236,13 +233,6 @@ const wordCount = computed(() => {
   const matches = content.value.trim().match(/[\u4e00-\u9fa5]|[A-Za-z0-9_]+/g)
   return matches ? matches.length : 0
 })
-const currentThemeLabel = computed(() => themes[currentTheme.value]?.name ?? '')
-const syncModeLabel = computed(() => {
-  if (syncMode.value === 'to-preview') return '滚动联动到预览区'
-  if (syncMode.value === 'to-editor') return '滚动联动到编辑区'
-  return '滚动独立'
-})
-
 let syncingEditor = false
 let syncingPreview = false
 let scrollMap: number[] = []
@@ -281,10 +271,9 @@ function renderCodeBlock(contentValue: string, languageName: string, line: numbe
       ? (md.options.highlight?.(contentValue, languageName, '') || md.utils.escapeHtml(contentValue))
       : (md.options.highlight?.(contentValue, '', '') || md.utils.escapeHtml(contentValue)))
     : md.utils.escapeHtml(contentValue)
-  const languageLabel = md.utils.escapeHtml(languageName || 'plaintext')
   const lineAttr = line !== null ? ` data-source-line="${line + 1}"` : ''
   const languageClass = languageName ? `language-${md.utils.escapeHtml(languageName)}` : 'language-plaintext'
-  return `<div class="code-block"${lineAttr}><div class="code-block-header"><span>${languageLabel}</span><span>code</span></div><pre><code class="hljs ${languageClass}">${highlighted}</code></pre></div>\n`
+  return `<div class="code-block"${lineAttr}><pre><code class="hljs ${languageClass}">${highlighted}</code></pre></div>\n`
 }
 
 md.renderer.rules.heading_open = injectLineNumbers
@@ -316,7 +305,7 @@ onMounted(() => {
   }
 
   const savedContent = localStorage.getItem('markdown-editor-content')
-  content.value = savedContent || '# Markdown 编辑预览器\n\n欢迎使用 Markdown 编辑预览器。这个版本重点强化了 VS Code 风格的双栏布局、代码块视觉和更清晰的排版。\n\n## 特性\n\n- 实时预览\n- 代码块高亮与语言标签\n- 数学公式支持\n- 更明显的分隔与状态信息\n\n## 语法示例\n\n### 代码块\n\n```ts\nfunction greet(name: string) {\n  console.log(`Hello, ${name}`)\n}\n\ngreet("world")\n```\n\n### 表格\n\n| 名称 | 描述 |\n| --- | --- |\n| Markdown | 轻量级标记语言 |\n| KaTeX | 数学公式渲染 |\n| highlight.js | 代码高亮 |\n\n### 数学公式\n\n行内公式: $E=mc^2$\n\n行间公式:\n\n$\\frac{d}{dx}\\left( \\int_{0}^{x} f(u)\\,du\\right)=f(x)$\n\n### 分隔线\n\n---\n\n### 引用\n\n> 现在的预览区会更像一个真正的编辑器预览面板，而不是简单把 HTML 堆出来。\n\n### 任务列表\n\n- [x] 已完成任务\n- [ ] 未完成任务\n'
+  content.value = savedContent || '# Markdown 编辑预览器\n\n## 语法示例\n\n### 代码块\n\n```ts\nfunction greet(name: string) {\n  console.log(`Hello, ${name}`)\n}\n\ngreet("world")\n```\n\n### 表格\n\n| 名称 | 描述 |\n| --- | --- |\n| Markdown | 轻量级标记语言 |\n| KaTeX | 数学公式渲染 |\n| highlight.js | 代码高亮 |\n\n### 数学公式\n\n行内公式: $E=mc^2$\n\n行间公式:\n\n$\\frac{d}{dx}\\left( \\int_{0}^{x} f(u)\\,du\\right)=f(x)$\n\n### 分隔线\n\n---\n\n### 引用\n\n> 这是一个引用示例。\n\n### 任务列表\n\n- [x] 已完成任务\n- [ ] 未完成任务\n'
 
   applyTheme(currentTheme.value)
   updateLineNumbers()
