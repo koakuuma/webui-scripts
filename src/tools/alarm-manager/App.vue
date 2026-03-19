@@ -6,7 +6,7 @@
       <div class="top-actions">
         <button class="icon-btn" v-if="currentTab === 'alarm'" @click="openModal()">+</button>
         <button class="icon-btn text-action-btn" v-if="currentTab === 'world-clock'" @click="openTimezoneModal">UTC</button>
-        <button class="icon-btn">⋮</button>
+        <button class="icon-btn" @click="openProjectRepo">⋮</button>
       </div>
     </div>
 
@@ -1314,6 +1314,10 @@ const selectTimezoneOffset = (offset: number) => {
   updateClockDisplay()
   closeTimezoneModal()
   void saveTimezoneOffset(offset)
+}
+
+const openProjectRepo = () => {
+  window.open('https://github.com/koakuuma/webui-scripts/', '_blank', 'noopener,noreferrer')
 }
 
 const getCurrentMinuteTriggerMark = (alarm: Pick<Alarm, 'time' | 'repeatMode' | 'days' | 'specificDate'>) => {
