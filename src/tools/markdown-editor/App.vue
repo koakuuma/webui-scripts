@@ -3,9 +3,7 @@
     class="vscode-shell"
     :class="{
       'is-editor-focused': activePane === 'editor',
-      'is-preview-focused': activePane === 'preview',
-      'theme-light': theme === 'light',
-      'theme-dark': theme === 'dark'
+      'is-preview-focused': activePane === 'preview'
     }"
   >
     <header class="titlebar">
@@ -17,9 +15,7 @@
       <div class="titlebar-center">
         <span class="title-text">{{ titleText }}</span>
       </div>
-      <div class="titlebar-actions">
-        <button class="theme-button" type="button" @click="toggleTheme">{{ theme === 'dark' ? 'Light' : 'Dark' }}</button>
-      </div>
+      <div class="titlebar-actions" aria-hidden="true"></div>
     </header>
 
     <section class="workbench" :style="{ '--sidebar-width': `${sidebarWidth}px` }">
@@ -32,36 +28,37 @@
         <div class="sidebar-section">
           <div class="sidebar-label">MARKDOWN FILES</div>
 
-          <form v-if="isCreatingFile" class="create-form" @submit.prevent="confirmCreateFile">
-            <input
-              ref="createInput"
-              v-model.trim="newFileName"
-              class="create-input"
-              type="text"
-              placeholder="example"
-              maxlength="64"
-              @keydown.esc.prevent="cancelCreateFile"
-            />
-            <div class="create-actions">
-              <button class="create-action primary" type="submit">Create</button>
-              <button class="create-action" type="button" @click="cancelCreateFile">Cancel</button>
-            </div>
-          </form>
-
           <div v-if="files.length" class="file-list">
-            <button
-              v-for="file in files"
-              :key="file.id"
-              class="file-item"
-              :class="{ 'is-active': file.id === activeFileId }"
-              type="button"
-              @click="selectFile(file.id)"
-              @contextmenu.prevent="openFileContextMenu($event, file.id)"
-            >
-              <span class="file-icon">M</span>
-              <span class="file-name">{{ file.name }}</span>
-              <span v-if="file.dirty" class="file-dirty"></span>
-            </button>
+            <template v-for="file in files" :key="file.id">
+              <button
+                v-if="renamingFileId !== file.id"
+                class="file-item"
+                :class="{ 'is-active': file.id === activeFileId }"
+                type="button"
+                @click="selectFile(file.id)"
+                @contextmenu.prevent="openFileContextMenu($event, file.id)"
+              >
+                <span class="file-icon">M</span>
+                <span class="file-name">{{ file.name }}</span>
+                <span v-if="file.dirty" class="file-dirty"></span>
+              </button>
+              <form
+                v-else
+                class="rename-form"
+                @submit.prevent="confirmRenameFile"
+              >
+                <span class="file-icon">M</span>
+                <input
+                  :ref="setRenameInput"
+                  v-model.trim="renameFileName"
+                  class="rename-input"
+                  type="text"
+                  maxlength="64"
+                  @blur="confirmRenameFile"
+                  @keydown.esc.prevent="cancelRenameFile"
+                />
+              </form>
+            </template>
           </div>
 
           <div v-else class="empty-state">
@@ -154,7 +151,7 @@
       class="context-menu"
       :style="{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }"
     >
-      <button class="context-menu-item" type="button" @click="clearContextFile">Clear File</button>
+      <button class="context-menu-item" type="button" @click="beginRenameFromContext">Rename File</button>
       <button class="context-menu-item danger" type="button" @click="deleteContextFile">Delete File</button>
     </div>
   </main>
@@ -176,15 +173,17 @@ type MarkdownFileRecord = {
   content: string
   updatedAt: number
   dirty?: boolean
+  manualName?: boolean
 }
 
 const DB_NAME = 'markdown-editor-workspace'
-const DB_VERSION = 1
+const DB_VERSION = 2
 const STORE_NAME = 'files'
+const SETTINGS_STORE = 'settings'
 const ACTIVE_FILE_KEY = 'markdown-editor-active-file-id'
-const THEME_KEY = 'markdown-editor-theme'
 const WORKSPACE_INIT_KEY = 'markdown-editor-workspace-initialized'
 const DEFAULT_FILE_NAME = 'example.md'
+const DEFAULT_UNTITLED_PREFIX = 'Untitled'
 const MIN_SIDEBAR_WIDTH = 200
 const MAX_SIDEBAR_WIDTH = 520
 const MIN_PREVIEW_WIDTH = 280
@@ -227,7 +226,7 @@ export function greet(name: string) {
 const editorHost = ref<HTMLElement | null>(null)
 const previewScrollContainer = ref<HTMLElement | null>(null)
 const preview = ref<HTMLElement | null>(null)
-const createInput = ref<HTMLInputElement | null>(null)
+const renameInput = ref<HTMLInputElement | null>(null)
 const editorGrid = ref<HTMLElement | null>(null)
 const editorInstance = shallowRef<monaco.editor.IStandaloneCodeEditor | null>(null)
 
@@ -235,13 +234,12 @@ const files = ref<MarkdownFileRecord[]>([])
 const activeFileId = ref('')
 const activePane = ref<'editor' | 'preview'>('editor')
 const renderedContent = ref('')
-const isCreatingFile = ref(false)
-const newFileName = ref('')
+const renamingFileId = ref('')
+const renameFileName = ref('')
 const cursorLine = ref(1)
 const cursorColumn = ref(1)
 const sidebarWidth = ref(280)
 const previewWidth = ref(440)
-const theme = ref<'dark' | 'light'>('dark')
 const contextMenu = ref({
   visible: false,
   x: 0,
@@ -294,6 +292,10 @@ const md = new MarkdownIt({
   }
 })
 
+function setRenameInput(element: Element | null) {
+  renameInput.value = element as HTMLInputElement | null
+}
+
 function injectLineNumbers(tokens: any, idx: number, options: any, env: any, slf: any) {
   const line = tokens[idx].map ? tokens[idx].map[0] : null
   if (line !== null) {
@@ -322,6 +324,9 @@ function openDatabase() {
         const database = request.result
         if (!database.objectStoreNames.contains(STORE_NAME)) {
           database.createObjectStore(STORE_NAME, { keyPath: 'id' })
+        }
+        if (!database.objectStoreNames.contains(SETTINGS_STORE)) {
+          database.createObjectStore(SETTINGS_STORE, { keyPath: 'key' })
         }
       }
 
@@ -356,12 +361,39 @@ async function putFile(file: MarkdownFileRecord) {
     id: file.id,
     name: file.name,
     content: file.content,
-    updatedAt: file.updatedAt
+    updatedAt: file.updatedAt,
+    manualName: file.manualName ?? false
   }))
 }
 
 async function deleteFile(id: string) {
   await withStore<undefined>('readwrite', (store) => store.delete(id))
+}
+
+async function getSetting<T>(key: string) {
+  const database = await openDatabase()
+
+  return new Promise<T | null>((resolve, reject) => {
+    const transaction = database.transaction(SETTINGS_STORE, 'readonly')
+    const store = transaction.objectStore(SETTINGS_STORE)
+    const request = store.get(key)
+
+    request.onsuccess = () => resolve((request.result?.value as T | undefined) ?? null)
+    request.onerror = () => reject(request.error)
+  })
+}
+
+async function putSetting<T>(key: string, value: T) {
+  const database = await openDatabase()
+
+  return new Promise<void>((resolve, reject) => {
+    const transaction = database.transaction(SETTINGS_STORE, 'readwrite')
+    const store = transaction.objectStore(SETTINGS_STORE)
+    const request = store.put({ key, value })
+
+    request.onsuccess = () => resolve()
+    request.onerror = () => reject(request.error)
+  })
 }
 
 function createFileRecord(name: string): MarkdownFileRecord {
@@ -370,7 +402,8 @@ function createFileRecord(name: string): MarkdownFileRecord {
     name,
     content: DEFAULT_NEW_FILE_CONTENT,
     updatedAt: Date.now(),
-    dirty: true
+    dirty: true,
+    manualName: false
   }
 }
 
@@ -413,30 +446,6 @@ function defineMonacoTheme() {
       'editorIndentGuide.activeBackground1': '#707070'
     }
   })
-
-  monaco.editor.defineTheme('vscode-markdown-light', {
-    base: 'vs',
-    inherit: true,
-    rules: [
-      { token: 'comment', foreground: '008000' },
-      { token: 'keyword', foreground: 'AF00DB' },
-      { token: 'string', foreground: 'A31515' },
-      { token: 'number', foreground: '098658' },
-      { token: 'type', foreground: '267F99' }
-    ],
-    colors: {
-      'editor.background': '#ffffff',
-      'editor.foreground': '#24292e',
-      'editorLineNumber.foreground': '#a0a1a7',
-      'editorLineNumber.activeForeground': '#4f525d',
-      'editor.lineHighlightBackground': '#f6f8fa',
-      'editor.selectionBackground': '#add6ff',
-      'editor.inactiveSelectionBackground': '#e5ebf1',
-      'editorCursor.foreground': '#24292e',
-      'editorIndentGuide.background1': '#d0d7de',
-      'editorIndentGuide.activeBackground1': '#8c959f'
-    }
-  })
 }
 
 function createEditor() {
@@ -445,7 +454,7 @@ function createEditor() {
   editorInstance.value = monaco.editor.create(editorHost.value, {
     value: '',
     language: 'markdown',
-    theme: theme.value === 'dark' ? 'vscode-markdown-dark' : 'vscode-markdown-light',
+    theme: 'vscode-markdown-dark',
     automaticLayout: true,
     minimap: { enabled: false },
     wordWrap: 'on',
@@ -490,21 +499,13 @@ function createEditor() {
     file.content = nextValue
     file.updatedAt = Date.now()
     file.dirty = true
+    applyAutoFileName(file)
     files.value = [...files.value]
   })
 
   editorInstance.value.onDidScrollChange(() => {
     handleEditorScroll()
   })
-}
-
-function syncThemeToEditor() {
-  monaco.editor.setTheme(theme.value === 'dark' ? 'vscode-markdown-dark' : 'vscode-markdown-light')
-  localStorage.setItem(THEME_KEY, theme.value)
-}
-
-function toggleTheme() {
-  theme.value = theme.value === 'dark' ? 'light' : 'dark'
 }
 
 function syncEditorWithActiveFile() {
@@ -522,6 +523,72 @@ function syncEditorWithActiveFile() {
 
   if (activeFile.value) {
     window.setTimeout(() => editorInstance.value?.focus(), 0)
+  }
+}
+
+function extractPrimaryHeading(markdown: string) {
+  const match = markdown.match(/^#\s+(.+)$/m)
+  return match?.[1]?.trim() ?? ''
+}
+
+function sanitizeHeadingToFileName(heading: string) {
+  const cleaned = heading
+    .replace(/[\\/:*?"<>|]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 64)
+
+  return cleaned ? `${cleaned}.md` : ''
+}
+
+function makeUniqueFileName(proposedName: string, excludeId = '') {
+  const normalized = normalizeFileName(proposedName)
+  if (!normalized) return ''
+
+  const lowerSet = new Set(
+    files.value
+      .filter((file) => file.id !== excludeId)
+      .map((file) => file.name.toLowerCase())
+  )
+
+  if (!lowerSet.has(normalized.toLowerCase())) {
+    return normalized
+  }
+
+  const baseName = normalized.replace(/\.md$/i, '')
+  let index = 2
+  let candidate = `${baseName} ${index}.md`
+
+  while (lowerSet.has(candidate.toLowerCase())) {
+    index++
+    candidate = `${baseName} ${index}.md`
+  }
+
+  return candidate
+}
+
+function generateUntitledFileName() {
+  const lowerSet = new Set(files.value.map((file) => file.name.toLowerCase()))
+  let index = 1
+  let candidate = `${DEFAULT_UNTITLED_PREFIX}-${index}.md`
+
+  while (lowerSet.has(candidate.toLowerCase())) {
+    index++
+    candidate = `${DEFAULT_UNTITLED_PREFIX}-${index}.md`
+  }
+
+  return candidate
+}
+
+function applyAutoFileName(file: MarkdownFileRecord) {
+  if (file.manualName) return
+
+  const heading = extractPrimaryHeading(file.content)
+  if (!heading) return
+
+  const nextName = makeUniqueFileName(sanitizeHeadingToFileName(heading), file.id)
+  if (nextName && nextName !== file.name) {
+    file.name = nextName
   }
 }
 
@@ -711,27 +778,13 @@ function setActivePane(pane: 'editor' | 'preview') {
   }
 }
 
-function startCreateFile() {
-  isCreatingFile.value = true
-  newFileName.value = ''
-  nextTick(() => createInput.value?.focus())
-}
-
-function cancelCreateFile() {
-  isCreatingFile.value = false
-  newFileName.value = ''
-}
-
-async function confirmCreateFile() {
-  const normalizedName = normalizeFileName(newFileName.value)
-  if (!normalizedName) return
-  if (files.value.some((file) => file.name.toLowerCase() === normalizedName.toLowerCase())) return
-
-  const file = createFileRecord(normalizedName)
+async function startCreateFile() {
+  closeContextMenu()
+  cancelRenameFile()
+  const file = createFileRecord(generateUntitledFileName())
   files.value = [file, ...files.value]
   activeFileId.value = file.id
   localStorage.setItem(ACTIVE_FILE_KEY, file.id)
-  cancelCreateFile()
   syncEditorWithActiveFile()
   renderMarkdown()
   await saveActiveFile()
@@ -746,14 +799,27 @@ async function saveActiveFile() {
   const file = activeFile.value
   if (!file) return
 
+  applyAutoFileName(file)
   file.updatedAt = Date.now()
   file.dirty = false
   await putFile(file)
   files.value = [...files.value].sort((a, b) => b.updatedAt - a.updatedAt)
 }
 
+async function persistLayout() {
+  await putSetting('layout', {
+    sidebarWidth: sidebarWidth.value,
+    previewWidth: previewWidth.value
+  })
+}
+
 async function loadWorkspace() {
   files.value = await getAllFiles()
+  const savedLayout = await getSetting<{ sidebarWidth: number, previewWidth: number }>('layout')
+  if (savedLayout) {
+    sidebarWidth.value = Math.max(MIN_SIDEBAR_WIDTH, Math.min(MAX_SIDEBAR_WIDTH, savedLayout.sidebarWidth))
+    previewWidth.value = Math.max(MIN_PREVIEW_WIDTH, savedLayout.previewWidth)
+  }
   if (!files.value.length && !localStorage.getItem(WORKSPACE_INIT_KEY)) {
     const defaultFile = createFileRecord(DEFAULT_FILE_NAME)
     defaultFile.dirty = false
@@ -794,20 +860,46 @@ function closeContextMenu() {
   contextMenu.value.visible = false
 }
 
-async function clearContextFile() {
-  const file = files.value.find((item) => item.id === contextMenu.value.fileId)
+function startRenameFile(fileId: string) {
+  const file = files.value.find((item) => item.id === fileId)
   if (!file) return
 
-  file.content = ''
-  file.updatedAt = Date.now()
-  file.dirty = false
-  await putFile(file)
-  files.value = [...files.value]
-  if (activeFileId.value === file.id) {
-    syncEditorWithActiveFile()
-    renderMarkdown()
+  renamingFileId.value = fileId
+  renameFileName.value = file.name.replace(/\.md$/i, '')
+  nextTick(() => {
+    renameInput.value?.focus()
+    renameInput.value?.select()
+  })
+}
+
+function cancelRenameFile() {
+  renamingFileId.value = ''
+  renameFileName.value = ''
+}
+
+async function confirmRenameFile() {
+  const file = files.value.find((item) => item.id === renamingFileId.value)
+  if (!file) {
+    cancelRenameFile()
+    return
   }
+
+  const nextName = makeUniqueFileName(renameFileName.value, file.id)
+  if (nextName) {
+    file.name = nextName
+    file.manualName = true
+    file.updatedAt = Date.now()
+    await putFile(file)
+    files.value = [...files.value]
+  }
+
+  cancelRenameFile()
+}
+
+function beginRenameFromContext() {
+  const fileId = contextMenu.value.fileId
   closeContextMenu()
+  startRenameFile(fileId)
 }
 
 async function deleteContextFile() {
@@ -848,6 +940,7 @@ function handlePointerMove(event: MouseEvent) {
 
 function stopSidebarResize() {
   if (!isResizingSidebar && !isResizingPreview) return
+  void persistLayout()
   isResizingSidebar = false
   isResizingPreview = false
   document.body.style.cursor = ''
@@ -884,13 +977,8 @@ md.renderer.rules.fence = (tokens, idx) => {
 }
 
 onMounted(async () => {
-  const savedTheme = localStorage.getItem(THEME_KEY)
-  if (savedTheme === 'light' || savedTheme === 'dark') {
-    theme.value = savedTheme
-  }
   configureMonacoEnvironment()
   defineMonacoTheme()
-  syncThemeToEditor()
   await loadWorkspace()
   await nextTick()
   createEditor()
@@ -922,10 +1010,6 @@ watch(activeFileId, async () => {
 
 watch(activeContent, () => {
   renderMarkdown()
-})
-
-watch(theme, () => {
-  syncThemeToEditor()
 })
 </script>
 
@@ -972,34 +1056,7 @@ watch(theme, () => {
   color: var(--vscode-text);
   background: #1e1e1e;
   font-family: "Segoe UI", "Microsoft YaHei UI", sans-serif;
-}
-
-.theme-light {
-  --vscode-titlebar: #f3f3f3;
-  --vscode-side-bar: #f8f8f8;
-  --vscode-editor-group: #ffffff;
-  --vscode-tab-active: #ffffff;
-  --vscode-tab-inactive: #ececec;
-  --vscode-border: #d8dee4;
-  --vscode-border-strong: #c8d1dc;
-  --vscode-text: #24292e;
-  --vscode-text-muted: #57606a;
-  --vscode-text-faint: #6e7781;
-  --vscode-accent: #0969da;
-  --vscode-statusbar: #0969da;
-  --vscode-preview-bg: #ffffff;
-  --vscode-preview-code: #f6f8fa;
-  --vscode-editor-bg: #ffffff;
-  --vscode-hover-bg: #eef2f6;
-  --vscode-panel-bg: #f6f8fa;
-  --vscode-inline-code: rgba(175, 184, 193, 0.2);
-  --vscode-code-comment: #6a737d;
-  --vscode-code-keyword: #d73a49;
-  --vscode-code-string: #032f62;
-  --vscode-code-number: #005cc5;
-  --vscode-code-function: #6f42c1;
-  --vscode-code-variable: #24292e;
-  background: #ffffff;
+  transition: background-color 180ms ease, color 180ms ease;
 }
 
 .titlebar {
@@ -1059,20 +1116,6 @@ watch(theme, () => {
   font-size: 12px;
 }
 
-.theme-button {
-  height: 24px;
-  padding: 0 10px;
-  border: 1px solid var(--vscode-border-strong);
-  background: var(--vscode-panel-bg);
-  color: var(--vscode-text);
-  font-size: 11px;
-  cursor: pointer;
-}
-
-.theme-button:hover {
-  background: var(--vscode-hover-bg);
-}
-
 .workbench {
   display: grid;
   grid-template-columns: var(--sidebar-width, 280px) 4px minmax(0, 1fr);
@@ -1119,8 +1162,7 @@ watch(theme, () => {
   line-height: 1;
 }
 
-.sidebar-button:hover,
-.create-action:hover {
+.sidebar-button:hover {
   background: var(--vscode-hover-bg);
 }
 
@@ -1137,51 +1179,10 @@ watch(theme, () => {
   font-size: 11px;
 }
 
-.create-form {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 10px;
-  border: 1px solid var(--vscode-border-strong);
-  background: var(--vscode-panel-bg);
-}
-
-.create-input {
-  height: 30px;
-  padding: 0 8px;
-  border: 1px solid #3c3c3c;
-  outline: none;
-  background: var(--vscode-editor-bg);
-  color: var(--vscode-text);
-}
-
-.create-input:focus {
-  border-color: var(--vscode-accent);
-}
-
-.create-actions {
-  display: flex;
-  gap: 8px;
-}
-
-.create-action {
-  height: 28px;
-  padding: 0 10px;
-  border: 1px solid #454545;
-  background: var(--vscode-panel-bg);
-  color: var(--vscode-text);
-  font-size: 12px;
-  cursor: pointer;
-}
-
-.create-action.primary {
-  border-color: #0e639c;
-  background: #0e639c;
-}
-
 .file-list {
   display: flex;
   flex-direction: column;
+  gap: 2px;
 }
 
 .file-item {
@@ -1195,10 +1196,12 @@ watch(theme, () => {
   color: var(--vscode-text);
   text-align: left;
   cursor: pointer;
+  transition: background-color 140ms ease, transform 140ms ease;
 }
 
 .file-item:hover {
   background: var(--vscode-hover-bg);
+  transform: translateX(1px);
 }
 
 .file-item.is-active {
@@ -1226,6 +1229,26 @@ watch(theme, () => {
   margin-left: auto;
   border-radius: 50%;
   background: #e2c08d;
+}
+
+.rename-form {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 28px;
+  padding: 0 10px;
+  background: color-mix(in srgb, var(--vscode-accent) 12%, var(--vscode-editor-group));
+}
+
+.rename-input {
+  width: 100%;
+  height: 22px;
+  border: 1px solid var(--vscode-accent);
+  outline: none;
+  background: #111111;
+  color: var(--vscode-text);
+  font-size: 12px;
+  padding: 0 6px;
 }
 
 .empty-state,
@@ -1277,6 +1300,7 @@ watch(theme, () => {
   background: var(--vscode-tab-inactive);
   color: var(--vscode-text-muted);
   font-size: 13px;
+  transition: background-color 140ms ease, color 140ms ease;
 }
 
 .editor-tab.is-active,
@@ -1287,7 +1311,7 @@ watch(theme, () => {
 
 .editor-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 4px minmax(320px, var(--preview-width, 440px));
+  grid-template-columns: minmax(0, 1fr) 8px minmax(320px, var(--preview-width, 440px));
   min-width: 0;
   min-height: 0;
   overflow: hidden;
@@ -1299,6 +1323,7 @@ watch(theme, () => {
   min-width: 0;
   min-height: 0;
   overflow: hidden;
+  transition: box-shadow 160ms ease;
 }
 
 .pane-header {
@@ -1407,6 +1432,12 @@ watch(theme, () => {
       var(--vscode-text-faint) 11px,
       transparent 11px);
   opacity: 0.8;
+  transition: opacity 140ms ease, transform 140ms ease;
+}
+
+.splitter:hover .splitter-grip {
+  opacity: 1;
+  transform: translate(-50%, -50%) scale(1.04);
 }
 
 .markdown-preview {
@@ -1654,6 +1685,7 @@ watch(theme, () => {
   border: 1px solid var(--vscode-border-strong);
   background: var(--vscode-panel-bg);
   box-shadow: 0 10px 24px rgba(0, 0, 0, 0.22);
+  animation: menu-in 120ms ease-out;
 }
 
 .context-menu-item {
@@ -1664,6 +1696,7 @@ watch(theme, () => {
   color: var(--vscode-text);
   text-align: left;
   cursor: pointer;
+  transition: background-color 120ms ease, color 120ms ease;
 }
 
 .context-menu-item:hover {
@@ -1674,6 +1707,18 @@ watch(theme, () => {
   color: #e5534b;
 }
 
+@keyframes menu-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 .is-editor-focused .pane-editor,
 .is-preview-focused .pane-preview {
   box-shadow: inset 0 0 0 1px var(--vscode-accent);
@@ -1681,7 +1726,7 @@ watch(theme, () => {
 
 @media (max-width: 960px) {
   .workbench {
-    grid-template-columns: minmax(200px, 220px) 4px minmax(0, 1fr);
+    grid-template-columns: minmax(200px, 220px) 8px minmax(0, 1fr);
   }
 
   .editor-grid {
@@ -1691,6 +1736,10 @@ watch(theme, () => {
 
   .splitter {
     height: 1px;
+  }
+
+  .splitter-grip {
+    display: none;
   }
 }
 
