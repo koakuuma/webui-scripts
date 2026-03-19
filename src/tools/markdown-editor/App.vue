@@ -166,7 +166,7 @@ const STORE_NAME = 'files'
 const SETTINGS_STORE = 'settings'
 const ACTIVE_FILE_KEY = 'markdown-editor-active-file-id'
 const WORKSPACE_INIT_KEY = 'markdown-editor-workspace-initialized'
-const DEFAULT_FILE_NAME = 'example.md'
+const DEFAULT_FILE_NAME = 'Markdown Example.md'
 const DEFAULT_UNTITLED_PREFIX = 'Untitled'
 const MIN_SIDEBAR_WIDTH = 200
 const MAX_SIDEBAR_WIDTH = 520
@@ -174,21 +174,31 @@ const MIN_PREVIEW_WIDTH = 280
 const PROJECT_URL = 'https://github.com/koakuuma/webui-scripts'
 const DEFAULT_NEW_FILE_CONTENT = `# Markdown Example
 
-Welcome to your Markdown workspace.
+Welcome to this Markdown workspace.
+欢迎使用这个 Markdown 工作区。
 
 ## Basic Formatting
+## 基础格式
 
 - Bold: **important**
+- 加粗：**important**
 - Italic: *note*
+- 斜体：*note*
 - Inline code: \`npm run dev\`
+- 行内代码：\`npm run dev\`
 
 ## Checklist
+## 检查清单
 
 - [x] Live preview
+- [x] 实时预览
 - [x] Ctrl+S save
+- [x] Ctrl+S 保存
 - [x] IndexedDB persistence
+- [x] IndexedDB 持久化
 
 ## Code Block
+## 代码块
 
 \`\`\`ts
 export function greet(name: string) {
@@ -197,15 +207,23 @@ export function greet(name: string) {
 \`\`\`
 
 ## Quote
+## 引用
 
 > Markdown lets you focus on writing.
+> Markdown 让你更专注于写作。
 
 ## Table
+## 表格
 
 | Section | Status |
 | --- | --- |
 | Editor | Ready |
 | Preview | Synced |
+
+| 项目 | 状态 |
+| --- | --- |
+| 编辑器 | 就绪 |
+| 预览区 | 已同步 |
 `
 
 const editorHost = ref<HTMLElement | null>(null)
@@ -248,6 +266,7 @@ let previewSyncFrame = 0
 let editorSyncFrame = 0
 let renderTimer = 0
 let renderVersion = 0
+let untypedFenceDecorations: string[] = []
 
 const activeFile = computed(() => files.value.find((file) => file.id === activeFileId.value) ?? null)
 const activeContent = computed(() => activeFile.value?.content ?? '')
@@ -497,6 +516,7 @@ function createEditor() {
     file.dirty = true
     applyAutoFileName(file)
     files.value = [...files.value]
+    updateUntypedFenceDecorations()
   })
 
   editorInstance.value.onDidScrollChange(() => {
@@ -516,10 +536,48 @@ function syncEditorWithActiveFile() {
   editorInstance.value.setScrollTop(0)
   editorInstance.value.setScrollLeft(0)
   suppressEditorChange = false
+  updateUntypedFenceDecorations()
 
   if (activeFile.value) {
     window.setTimeout(() => editorInstance.value?.focus(), 0)
   }
+}
+
+function updateUntypedFenceDecorations() {
+  if (!editorInstance.value) return
+
+  const lines = activeContent.value.split('\n')
+  const decorations: monaco.editor.IModelDeltaDecoration[] = []
+  let fenceStart = -1
+  let hasLanguage = false
+
+  for (let index = 0; index < lines.length; index++) {
+    const line = lines[index]
+    const fenceMatch = line.match(/^```(.*)$/)
+
+    if (!fenceMatch) continue
+
+    if (fenceStart === -1) {
+      fenceStart = index
+      hasLanguage = fenceMatch[1].trim().length > 0
+      continue
+    }
+
+    if (!hasLanguage && index > fenceStart + 1) {
+      decorations.push({
+        range: new monaco.Range(fenceStart + 2, 1, index, 1),
+        options: {
+          isWholeLine: true,
+          className: 'untyped-fence-line'
+        }
+      })
+    }
+
+    fenceStart = -1
+    hasLanguage = false
+  }
+
+  untypedFenceDecorations = editorInstance.value.deltaDecorations(untypedFenceDecorations, decorations)
 }
 
 function extractPrimaryHeading(markdown: string) {
@@ -604,7 +662,7 @@ function renderMarkdownNow(version: number) {
       if (!unchecked && !checked) return
 
       item.classList.add('task-list-item')
-      item.innerHTML = `${checked ? '<input class="task-list-checkbox" type="checkbox" disabled checked>' : '<input class="task-list-checkbox" type="checkbox" disabled>'}${html.replace(/^\s*\[( |x|X)\]\s*/, '')}`
+      item.innerHTML = `${checked ? '<span class="task-list-checkbox is-checked" aria-hidden="true"></span>' : '<span class="task-list-checkbox" aria-hidden="true"></span>'}${html.replace(/^\s*\[( |x|X)\]\s*/, '')}`
     })
 
     renderMathInElement(preview.value, {
@@ -1506,6 +1564,11 @@ watch(titleText, (value) => {
   color: var(--vscode-text-muted) !important;
 }
 
+.vscode-shell :deep(.view-line .untyped-fence-line),
+.vscode-shell :deep(.view-line .untyped-fence-line span) {
+  color: #d4d4d4 !important;
+}
+
 .vscode-shell :deep(.monaco-scrollable-element > .scrollbar.vertical),
 .vscode-shell :deep(.monaco-scrollable-element > .scrollbar.horizontal) {
   opacity: 1 !important;
@@ -1572,9 +1635,30 @@ watch(titleText, (value) => {
 }
 
 .markdown-preview :deep(.task-list-checkbox) {
+  display: inline-flex;
+  width: 14px;
+  height: 14px;
   margin: 0 10px 0 -1.6em;
-  vertical-align: middle;
-  accent-color: var(--vscode-accent);
+  vertical-align: -2px;
+  border: 1px solid #6e7681;
+  border-radius: 3px;
+  background: transparent;
+}
+
+.markdown-preview :deep(.task-list-checkbox.is-checked) {
+  align-items: center;
+  justify-content: center;
+  border-color: #238636;
+  background: #238636;
+}
+
+.markdown-preview :deep(.task-list-checkbox.is-checked)::before {
+  content: "";
+  width: 7px;
+  height: 4px;
+  border-left: 2px solid #ffffff;
+  border-bottom: 2px solid #ffffff;
+  transform: rotate(-45deg) translateY(-1px);
 }
 
 .markdown-preview :deep(a) {
