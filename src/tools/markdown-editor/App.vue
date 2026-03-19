@@ -7,10 +7,10 @@
     }"
   >
     <header class="titlebar">
-      <div class="window-controls" aria-hidden="true">
-        <span class="window-dot close"></span>
-        <span class="window-dot minimize"></span>
-        <span class="window-dot maximize"></span>
+      <div class="window-controls">
+        <button class="window-dot close" type="button" aria-label="Save and close current file" @click="saveAndCloseCurrentFile"></button>
+        <button class="window-dot minimize" type="button" aria-label="Open repository" @click="openProjectLink"></button>
+        <button class="window-dot maximize" type="button" aria-label="Open repository in a new tab" @click="openProjectLink"></button>
       </div>
       <div class="titlebar-center">
         <span class="title-text">{{ titleText }}</span>
@@ -19,15 +19,13 @@
     </header>
 
     <section class="workbench" :style="{ '--sidebar-width': `${sidebarWidth}px` }">
-      <aside class="sidebar">
+      <aside class="sidebar" @mousedown="setActivePane('sidebar')">
         <div class="sidebar-header">
           <span>Explorer</span>
           <button class="sidebar-button icon-button" type="button" aria-label="New Markdown file" @click="startCreateFile">+</button>
         </div>
 
         <div class="sidebar-section">
-          <div class="sidebar-label">MARKDOWN FILES</div>
-
           <div v-if="files.length" class="file-list">
             <template v-for="file in files" :key="file.id">
               <button
@@ -77,23 +75,15 @@
             <span class="tab-title">{{ activeFile?.name ?? 'No file open' }}</span>
             <span v-if="activeFile?.dirty" class="tab-dirty"></span>
           </div>
-          <div class="editor-tab preview-tab">
-            <span class="preview-icon">PV</span>
-            <span class="tab-title">Markdown Preview</span>
-          </div>
         </div>
 
         <div ref="editorGrid" class="editor-grid" :style="{ '--preview-width': `${previewWidth}px` }">
           <section class="pane pane-editor">
-            <header class="pane-header">
-              <div class="pane-title">
-                <span>{{ activeFile?.name ?? 'Untitled' }}</span>
-              </div>
-              <div class="pane-tools">
-                <span>Markdown</span>
-              </div>
-            </header>
-            <div class="pane-body pane-body-editor" @mousedown="setActivePane('editor')">
+            <div
+              class="pane-body pane-body-editor"
+              @mousedown="setActivePane('editor')"
+              @mousedown.middle.prevent="startMiddleScroll('editor', $event)"
+            >
               <div v-if="!activeFile" class="pane-placeholder">
                 Create a Markdown file from the sidebar to start editing.
               </div>
@@ -106,17 +96,11 @@
           </div>
 
           <section class="pane pane-preview">
-            <header class="pane-header">
-              <div class="pane-title">
-                <span class="preview-icon">PV</span>
-                <span>Preview</span>
-              </div>
-              <div class="pane-tools">
-                <span>{{ wordCount }} words</span>
-                <span>{{ readingTime }}</span>
-              </div>
-            </header>
-            <div class="pane-body pane-body-preview" @mousedown="setActivePane('preview')">
+            <div
+              class="pane-body pane-body-preview"
+              @mousedown="setActivePane('preview')"
+              @mousedown.middle.prevent="startMiddleScroll('preview', $event)"
+            >
               <div v-if="!activeFile" class="pane-placeholder">
                 The preview will appear here after you create a `.md` file.
               </div>
@@ -187,6 +171,7 @@ const DEFAULT_UNTITLED_PREFIX = 'Untitled'
 const MIN_SIDEBAR_WIDTH = 200
 const MAX_SIDEBAR_WIDTH = 520
 const MIN_PREVIEW_WIDTH = 280
+const PROJECT_URL = 'https://github.com/koakuuma/webui-scripts'
 const DEFAULT_NEW_FILE_CONTENT = `# Markdown Example
 
 Welcome to your Markdown workspace.
@@ -232,7 +217,7 @@ const editorInstance = shallowRef<monaco.editor.IStandaloneCodeEditor | null>(nu
 
 const files = ref<MarkdownFileRecord[]>([])
 const activeFileId = ref('')
-const activePane = ref<'editor' | 'preview'>('editor')
+const activePane = ref<'editor' | 'preview' | 'sidebar'>('editor')
 const renderedContent = ref('')
 const renamingFileId = ref('')
 const renameFileName = ref('')
@@ -246,6 +231,11 @@ const contextMenu = ref({
   y: 0,
   fileId: ''
 })
+const middleScrollState = ref<{
+  target: 'editor' | 'preview'
+  startY: number
+  startTop: number
+} | null>(null)
 
 let dbPromise: Promise<IDBDatabase> | null = null
 let syncingEditor = false
@@ -256,19 +246,12 @@ let isResizingSidebar = false
 let isResizingPreview = false
 let previewSyncFrame = 0
 let editorSyncFrame = 0
+let renderTimer = 0
+let renderVersion = 0
 
 const activeFile = computed(() => files.value.find((file) => file.id === activeFileId.value) ?? null)
 const activeContent = computed(() => activeFile.value?.content ?? '')
 const lineCount = computed(() => (activeContent.value ? activeContent.value.split('\n').length : 0))
-const wordCount = computed(() => {
-  const matches = activeContent.value
-    .replace(/```[\s\S]*?```/g, ' ')
-    .replace(/`[^`]*`/g, ' ')
-    .match(/[A-Za-z0-9_\u4e00-\u9fa5]+/g)
-
-  return matches?.length ?? 0
-})
-const readingTime = computed(() => `${Math.max(1, Math.ceil(wordCount.value / 220))} min read`)
 const cursorStatus = computed(() => `Ln ${cursorLine.value}, Col ${cursorColumn.value}`)
 const titleText = computed(() => activeFile.value?.name ?? 'No File')
 
@@ -277,18 +260,18 @@ const md = new MarkdownIt({
   breaks: true,
   linkify: true,
   highlight: (source, language) => {
-    if (language && hljs.getLanguage(language)) {
+    if (!language) {
+      return md.utils.escapeHtml(source)
+    }
+
+    if (hljs.getLanguage(language)) {
       try {
         return hljs.highlight(source, { language }).value
       } catch {
       }
     }
 
-    try {
-      return hljs.highlightAuto(source).value
-    } catch {
-      return md.utils.escapeHtml(source)
-    }
+    return md.utils.escapeHtml(source)
   }
 })
 
@@ -431,7 +414,20 @@ function defineMonacoTheme() {
       { token: 'keyword', foreground: 'C586C0' },
       { token: 'string', foreground: 'CE9178' },
       { token: 'number', foreground: 'B5CEA8' },
-      { token: 'type', foreground: '4EC9B0' }
+      { token: 'type', foreground: '4EC9B0' },
+      { token: 'tag', foreground: 'D4D4D4' },
+      { token: 'tag.html', foreground: 'D4D4D4' },
+      { token: 'delimiter.html', foreground: 'D4D4D4' },
+      { token: 'metatag', foreground: 'D4D4D4' },
+      { token: 'attribute.name', foreground: 'D4D4D4' },
+      { token: 'attribute.value', foreground: 'D4D4D4' },
+      { token: 'attribute.name.html', foreground: 'D4D4D4' },
+      { token: 'attribute.value.html', foreground: 'D4D4D4' },
+      { token: 'string.html', foreground: 'D4D4D4' },
+      { token: 'delimiter.angle', foreground: 'D4D4D4' },
+      { token: 'tag-name', foreground: 'D4D4D4' },
+      { token: 'source', foreground: 'D4D4D4' },
+      { token: 'text', foreground: 'D4D4D4' }
     ],
     colors: {
       'editor.background': '#1e1e1e',
@@ -467,7 +463,7 @@ function createEditor() {
     lineDecorationsWidth: 12,
     lineNumbersMinChars: 4,
     padding: { top: 12, bottom: 24 },
-    fontFamily: 'Consolas, "Courier New", monospace',
+    fontFamily: 'Consolas, "Cascadia Mono", "Courier New", monospace',
     fontSize: 14,
     lineHeight: 22,
     roundedSelection: false,
@@ -592,11 +588,24 @@ function applyAutoFileName(file: MarkdownFileRecord) {
   }
 }
 
-function renderMarkdown() {
-  renderedContent.value = activeFile.value ? md.render(activeFile.value.content) : ''
+function renderMarkdownNow(version: number) {
+  const file = activeFile.value
+  renderedContent.value = file ? md.render(file.content) : ''
 
   nextTick(() => {
+    if (version !== renderVersion) return
     if (!preview.value) return
+
+    preview.value.querySelectorAll('li').forEach((item) => {
+      const html = item.innerHTML
+      const unchecked = html.match(/^\s*\[\s\]\s*/)
+      const checked = html.match(/^\s*\[(x|X)\]\s*/)
+
+      if (!unchecked && !checked) return
+
+      item.classList.add('task-list-item')
+      item.innerHTML = `${checked ? '<input class="task-list-checkbox" type="checkbox" disabled checked>' : '<input class="task-list-checkbox" type="checkbox" disabled>'}${html.replace(/^\s*\[( |x|X)\]\s*/, '')}`
+    })
 
     renderMathInElement(preview.value, {
       delimiters: [
@@ -613,6 +622,15 @@ function renderMarkdown() {
 
     buildScrollMap()
   })
+}
+
+function scheduleRenderMarkdown(delay = 40) {
+  renderVersion += 1
+  const currentVersion = renderVersion
+  window.clearTimeout(renderTimer)
+  renderTimer = window.setTimeout(() => {
+    renderMarkdownNow(currentVersion)
+  }, delay)
 }
 
 function buildScrollMap() {
@@ -665,55 +683,8 @@ function buildScrollMap() {
   scrollMap = nextScrollMap
 }
 
-function animateScroll(
-  getTop: () => number,
-  setTop: (value: number) => void,
-  targetTop: number,
-  onComplete: () => void,
-  kind: 'preview' | 'editor'
-) {
-  const startTop = getTop()
-  const delta = targetTop - startTop
-
-  if (Math.abs(delta) < 1) {
-    setTop(targetTop)
-    onComplete()
-    return
-  }
-
-  const startedAt = performance.now()
-  const duration = 110
-
-  const step = (now: number) => {
-    const progress = Math.min(1, (now - startedAt) / duration)
-    const eased = 1 - Math.pow(1 - progress, 3)
-    setTop(startTop + delta * eased)
-
-    if (progress < 1) {
-      if (kind === 'preview') {
-        previewSyncFrame = window.requestAnimationFrame(step)
-      } else {
-        editorSyncFrame = window.requestAnimationFrame(step)
-      }
-      return
-    }
-
-    onComplete()
-  }
-
-  if (kind === 'preview') {
-    window.cancelAnimationFrame(previewSyncFrame)
-    previewSyncFrame = window.requestAnimationFrame(step)
-  } else {
-    window.cancelAnimationFrame(editorSyncFrame)
-    editorSyncFrame = window.requestAnimationFrame(step)
-  }
-}
-
 function handleEditorScroll() {
   if (!editorInstance.value || !previewScrollContainer.value || syncingEditor || !activeFile.value) return
-
-  syncingPreview = true
 
   const visibleRange = editorInstance.value.getVisibleRanges()[0]
   const lineNumber = visibleRange?.startLineNumber ?? 1
@@ -726,25 +697,22 @@ function handleEditorScroll() {
   const next = scrollMap[lineNumber] ?? base
   const targetTop = base + (next - base) * safeRatio
 
-  animateScroll(
-    () => previewScrollContainer.value?.scrollTop ?? 0,
-    (value) => {
-      if (previewScrollContainer.value) {
-        previewScrollContainer.value.scrollTop = value
-      }
-    },
-    targetTop,
-    () => {
+  syncingPreview = true
+  window.cancelAnimationFrame(previewSyncFrame)
+  previewSyncFrame = window.requestAnimationFrame(() => {
+    if (previewScrollContainer.value) {
+      previewScrollContainer.value.scrollTop = targetTop
+    }
+
+    window.requestAnimationFrame(() => {
       syncingPreview = false
-    },
-    'preview'
-  )
+    })
+  })
 }
 
 function handlePreviewScroll() {
   if (!previewScrollContainer.value || !editorInstance.value || syncingPreview || !activeFile.value) return
 
-  syncingEditor = true
   activePane.value = 'preview'
 
   const top = previewScrollContainer.value.scrollTop
@@ -758,20 +726,18 @@ function handlePreviewScroll() {
   }
   const targetTop = editorInstance.value.getTopForLineNumber(Math.max(1, lineIndex + 1))
 
-  animateScroll(
-    () => editorInstance.value?.getScrollTop() ?? 0,
-    (value) => {
-      editorInstance.value?.setScrollTop(value)
-    },
-    targetTop,
-    () => {
+  syncingEditor = true
+  window.cancelAnimationFrame(editorSyncFrame)
+  editorSyncFrame = window.requestAnimationFrame(() => {
+    editorInstance.value?.setScrollTop(targetTop)
+
+    window.requestAnimationFrame(() => {
       syncingEditor = false
-    },
-    'editor'
-  )
+    })
+  })
 }
 
-function setActivePane(pane: 'editor' | 'preview') {
+function setActivePane(pane: 'editor' | 'preview' | 'sidebar') {
   activePane.value = pane
   if (pane === 'editor') {
     editorInstance.value?.focus()
@@ -786,11 +752,12 @@ async function startCreateFile() {
   activeFileId.value = file.id
   localStorage.setItem(ACTIVE_FILE_KEY, file.id)
   syncEditorWithActiveFile()
-  renderMarkdown()
+  scheduleRenderMarkdown(0)
   await saveActiveFile()
 }
 
 function selectFile(fileId: string) {
+  activePane.value = 'sidebar'
   activeFileId.value = fileId
   localStorage.setItem(ACTIVE_FILE_KEY, fileId)
 }
@@ -845,6 +812,36 @@ function startPreviewResize() {
   isResizingPreview = true
   document.body.style.cursor = 'col-resize'
   document.body.style.userSelect = 'none'
+}
+
+function startMiddleScroll(target: 'editor' | 'preview', event: MouseEvent) {
+  closeContextMenu()
+  const startTop = target === 'editor'
+    ? (editorInstance.value?.getScrollTop() ?? 0)
+    : (previewScrollContainer.value?.scrollTop ?? 0)
+
+  middleScrollState.value = {
+    target,
+    startY: event.clientY,
+    startTop
+  }
+
+  document.body.style.cursor = 'ns-resize'
+  document.body.style.userSelect = 'none'
+}
+
+async function saveAndCloseCurrentFile() {
+  if (activeFile.value?.dirty) {
+    await saveActiveFile()
+  }
+
+  activeFileId.value = ''
+  localStorage.removeItem(ACTIVE_FILE_KEY)
+  renderedContent.value = ''
+}
+
+function openProjectLink() {
+  window.open(PROJECT_URL, '_blank', 'noopener,noreferrer')
 }
 
 function openFileContextMenu(event: MouseEvent, fileId: string) {
@@ -915,6 +912,7 @@ async function deleteContextFile() {
   }
 
   closeContextMenu()
+  scheduleRenderMarkdown(0)
 }
 
 function handleGlobalPointerDown(event: MouseEvent) {
@@ -924,6 +922,18 @@ function handleGlobalPointerDown(event: MouseEvent) {
 }
 
 function handlePointerMove(event: MouseEvent) {
+  if (middleScrollState.value) {
+    const { target, startY, startTop } = middleScrollState.value
+    const nextTop = Math.max(0, startTop + (event.clientY - startY) * 2.2)
+
+    if (target === 'editor') {
+      editorInstance.value?.setScrollTop(nextTop)
+    } else if (previewScrollContainer.value) {
+      previewScrollContainer.value.scrollTop = nextTop
+    }
+    return
+  }
+
   if (isResizingSidebar) {
     const nextWidth = Math.max(MIN_SIDEBAR_WIDTH, Math.min(MAX_SIDEBAR_WIDTH, event.clientX))
     sidebarWidth.value = nextWidth
@@ -939,7 +949,16 @@ function handlePointerMove(event: MouseEvent) {
 }
 
 function stopSidebarResize() {
-  if (!isResizingSidebar && !isResizingPreview) return
+  if (middleScrollState.value) {
+    middleScrollState.value = null
+  }
+
+  if (!isResizingSidebar && !isResizingPreview && !middleScrollState.value) {
+    document.body.style.cursor = ''
+    document.body.style.userSelect = ''
+    return
+  }
+
   void persistLayout()
   isResizingSidebar = false
   isResizingPreview = false
@@ -953,9 +972,19 @@ function handleResize() {
 }
 
 async function handleKeydown(event: KeyboardEvent) {
+  const target = event.target as HTMLElement | null
+  const isTypingTarget = !!target?.closest('input, textarea, [contenteditable="true"]')
+
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
     event.preventDefault()
     await saveActiveFile()
+    return
+  }
+
+  if (event.key === 'Delete' && !isTypingTarget && activePane.value === 'sidebar' && activeFile.value) {
+    event.preventDefault()
+    contextMenu.value.fileId = activeFile.value.id
+    await deleteContextFile()
   }
 }
 
@@ -983,7 +1012,7 @@ onMounted(async () => {
   await nextTick()
   createEditor()
   syncEditorWithActiveFile()
-  renderMarkdown()
+  scheduleRenderMarkdown(0)
   window.addEventListener('resize', handleResize)
   window.addEventListener('keydown', handleKeydown)
   window.addEventListener('mousemove', handlePointerMove)
@@ -997,6 +1026,7 @@ onUnmounted(() => {
   window.removeEventListener('mousemove', handlePointerMove)
   window.removeEventListener('mouseup', stopSidebarResize)
   window.removeEventListener('mousedown', handleGlobalPointerDown)
+  window.clearTimeout(renderTimer)
   window.cancelAnimationFrame(previewSyncFrame)
   window.cancelAnimationFrame(editorSyncFrame)
   editorInstance.value?.dispose()
@@ -1005,12 +1035,16 @@ onUnmounted(() => {
 watch(activeFileId, async () => {
   await nextTick()
   syncEditorWithActiveFile()
-  renderMarkdown()
+  scheduleRenderMarkdown(0)
 })
 
 watch(activeContent, () => {
-  renderMarkdown()
+  scheduleRenderMarkdown()
 })
+
+watch(titleText, (value) => {
+  document.title = value
+}, { immediate: true })
 </script>
 
 <style scoped>
@@ -1055,7 +1089,7 @@ watch(activeContent, () => {
   overflow: hidden;
   color: var(--vscode-text);
   background: #1e1e1e;
-  font-family: "Segoe UI", "Microsoft YaHei UI", sans-serif;
+  font-family: "Segoe WPC", "Segoe UI", "Microsoft YaHei UI", sans-serif;
   transition: background-color 180ms ease, color 180ms ease;
 }
 
@@ -1080,6 +1114,9 @@ watch(activeContent, () => {
   width: 12px;
   height: 12px;
   border-radius: 50%;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
 }
 
 .window-dot.close {
@@ -1172,11 +1209,6 @@ watch(activeContent, () => {
   gap: 10px;
   padding: 10px 12px 12px;
   overflow: auto;
-}
-
-.sidebar-label {
-  color: var(--vscode-text-faint);
-  font-size: 11px;
 }
 
 .file-list {
@@ -1319,34 +1351,11 @@ watch(activeContent, () => {
 
 .pane {
   display: grid;
-  grid-template-rows: 35px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   min-width: 0;
   min-height: 0;
   overflow: hidden;
   transition: box-shadow 160ms ease;
-}
-
-.pane-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 0 14px;
-  border-bottom: 1px solid var(--vscode-border);
-  background: var(--vscode-panel-bg);
-  font-size: 12px;
-}
-
-.pane-title,
-.pane-tools {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-
-.pane-tools {
-  color: var(--vscode-text-faint);
 }
 
 .pane-body {
@@ -1369,6 +1378,24 @@ watch(activeContent, () => {
 
 .preview-scroll-container {
   overflow: auto;
+  scrollbar-width: auto;
+  scrollbar-color: #5a5a5a #1f1f1f;
+  direction: rtl;
+}
+
+.preview-scroll-container::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+
+.preview-scroll-container::-webkit-scrollbar-track {
+  background: #1f1f1f;
+}
+
+.preview-scroll-container::-webkit-scrollbar-thumb {
+  border: 2px solid #1f1f1f;
+  border-radius: 999px;
+  background: #5a5a5a;
 }
 
 .sidebar-splitter {
@@ -1449,6 +1476,8 @@ watch(activeContent, () => {
   font-size: 14px;
   line-height: 1.6;
   word-break: break-word;
+  font-family: "Segoe WPC", "Segoe UI", "Microsoft YaHei UI", sans-serif;
+  direction: ltr;
 }
 
 .vscode-shell :deep(.monaco-editor),
@@ -1475,6 +1504,25 @@ watch(activeContent, () => {
 
 .vscode-shell :deep(.monaco-editor .line-numbers.active-line-number) {
   color: var(--vscode-text-muted) !important;
+}
+
+.vscode-shell :deep(.monaco-scrollable-element > .scrollbar.vertical),
+.vscode-shell :deep(.monaco-scrollable-element > .scrollbar.horizontal) {
+  opacity: 1 !important;
+}
+
+.vscode-shell :deep(.monaco-scrollable-element > .scrollbar.vertical) {
+  width: 12px !important;
+}
+
+.vscode-shell :deep(.monaco-scrollable-element > .scrollbar.horizontal) {
+  height: 12px !important;
+}
+
+.vscode-shell :deep(.monaco-scrollable-element > .scrollbar > .slider) {
+  border: 2px solid #1f1f1f;
+  border-radius: 999px;
+  background: #5a5a5a !important;
 }
 
 .markdown-preview :deep(h1),
@@ -1519,6 +1567,16 @@ watch(activeContent, () => {
   padding-left: 2em;
 }
 
+.markdown-preview :deep(.task-list-item) {
+  list-style: none;
+}
+
+.markdown-preview :deep(.task-list-checkbox) {
+  margin: 0 10px 0 -1.6em;
+  vertical-align: middle;
+  accent-color: var(--vscode-accent);
+}
+
 .markdown-preview :deep(a) {
   color: var(--vscode-accent);
   text-decoration: none;
@@ -1538,7 +1596,7 @@ watch(activeContent, () => {
   padding: 0.15em 0.4em;
   border-radius: 3px;
   background: var(--vscode-inline-code);
-  font-family: Consolas, "Courier New", monospace;
+  font-family: Consolas, "Cascadia Mono", "Courier New", monospace;
   font-size: 0.95em;
 }
 
@@ -1569,7 +1627,7 @@ watch(activeContent, () => {
   display: block;
   padding: 0;
   background: transparent;
-  font-family: Consolas, "Courier New", monospace;
+  font-family: Consolas, "Cascadia Mono", "Courier New", monospace;
   font-size: 13px;
   line-height: 1.45;
 }
