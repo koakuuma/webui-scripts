@@ -1080,7 +1080,7 @@ const openModal = (alarm: Alarm | null = null) => {
     const now = new Date()
     timeStr = now.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false })
     form.label = ''
-    form.repeatMode = 'once'
+    form.repeatMode = 'daily'
     form.days = []
     const tomorrow = new Date()
     tomorrow.setDate(tomorrow.getDate() + 1)
