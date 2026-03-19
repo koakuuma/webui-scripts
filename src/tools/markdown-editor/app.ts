@@ -783,7 +783,7 @@ function handleGlobalPointerDown(event: MouseEvent) {
 function handlePointerMove(event: MouseEvent) {
   if (middleScrollState.value) {
     const { target, startY, startTop } = middleScrollState.value
-    const nextTop = Math.max(0, startTop + (event.clientY - startY) * 2.2)
+    const nextTop = Math.max(0, startTop + (event.clientY - startY) * 5)
 
     if (target === 'editor') {
       editorInstance.value?.setScrollTop(nextTop)
