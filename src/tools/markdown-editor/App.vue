@@ -183,6 +183,7 @@ const DB_VERSION = 1
 const STORE_NAME = 'files'
 const ACTIVE_FILE_KEY = 'markdown-editor-active-file-id'
 const THEME_KEY = 'markdown-editor-theme'
+const WORKSPACE_INIT_KEY = 'markdown-editor-workspace-initialized'
 const DEFAULT_FILE_NAME = 'example.md'
 const MIN_SIDEBAR_WIDTH = 200
 const MAX_SIDEBAR_WIDTH = 520
@@ -241,6 +242,12 @@ const cursorColumn = ref(1)
 const sidebarWidth = ref(280)
 const previewWidth = ref(440)
 const theme = ref<'dark' | 'light'>('dark')
+const contextMenu = ref({
+  visible: false,
+  x: 0,
+  y: 0,
+  fileId: ''
+})
 
 let dbPromise: Promise<IDBDatabase> | null = null
 let syncingEditor = false
@@ -351,6 +358,10 @@ async function putFile(file: MarkdownFileRecord) {
     content: file.content,
     updatedAt: file.updatedAt
   }))
+}
+
+async function deleteFile(id: string) {
+  await withStore<undefined>('readwrite', (store) => store.delete(id))
 }
 
 function createFileRecord(name: string): MarkdownFileRecord {
@@ -743,11 +754,12 @@ async function saveActiveFile() {
 
 async function loadWorkspace() {
   files.value = await getAllFiles()
-  if (!files.value.length) {
+  if (!files.value.length && !localStorage.getItem(WORKSPACE_INIT_KEY)) {
     const defaultFile = createFileRecord(DEFAULT_FILE_NAME)
     defaultFile.dirty = false
     await putFile(defaultFile)
     files.value = [defaultFile]
+    localStorage.setItem(WORKSPACE_INIT_KEY, '1')
   }
   const lastActiveId = localStorage.getItem(ACTIVE_FILE_KEY) || ''
   activeFileId.value = files.value.some((file) => file.id === lastActiveId)
@@ -756,15 +768,67 @@ async function loadWorkspace() {
 }
 
 function startSidebarResize() {
+  closeContextMenu()
   isResizingSidebar = true
   document.body.style.cursor = 'col-resize'
   document.body.style.userSelect = 'none'
 }
 
 function startPreviewResize() {
+  closeContextMenu()
   isResizingPreview = true
   document.body.style.cursor = 'col-resize'
   document.body.style.userSelect = 'none'
+}
+
+function openFileContextMenu(event: MouseEvent, fileId: string) {
+  contextMenu.value = {
+    visible: true,
+    x: event.clientX,
+    y: event.clientY,
+    fileId
+  }
+}
+
+function closeContextMenu() {
+  contextMenu.value.visible = false
+}
+
+async function clearContextFile() {
+  const file = files.value.find((item) => item.id === contextMenu.value.fileId)
+  if (!file) return
+
+  file.content = ''
+  file.updatedAt = Date.now()
+  file.dirty = false
+  await putFile(file)
+  files.value = [...files.value]
+  if (activeFileId.value === file.id) {
+    syncEditorWithActiveFile()
+    renderMarkdown()
+  }
+  closeContextMenu()
+}
+
+async function deleteContextFile() {
+  const fileId = contextMenu.value.fileId
+  if (!fileId) return
+
+  await deleteFile(fileId)
+  files.value = files.value.filter((item) => item.id !== fileId)
+
+  if (activeFileId.value === fileId) {
+    activeFileId.value = files.value[0]?.id ?? ''
+    localStorage.setItem(ACTIVE_FILE_KEY, activeFileId.value)
+  }
+
+  closeContextMenu()
+}
+
+function handleGlobalPointerDown(event: MouseEvent) {
+  const target = event.target as HTMLElement | null
+  if (target?.closest('.context-menu')) return
+  closeContextMenu()
 }
 
 function handlePointerMove(event: MouseEvent) {
@@ -836,6 +900,7 @@ onMounted(async () => {
   window.addEventListener('keydown', handleKeydown)
   window.addEventListener('mousemove', handlePointerMove)
   window.addEventListener('mouseup', stopSidebarResize)
+  window.addEventListener('mousedown', handleGlobalPointerDown)
 })
 
 onUnmounted(() => {
@@ -843,6 +908,7 @@ onUnmounted(() => {
   window.removeEventListener('keydown', handleKeydown)
   window.removeEventListener('mousemove', handlePointerMove)
   window.removeEventListener('mouseup', stopSidebarResize)
+  window.removeEventListener('mousedown', handleGlobalPointerDown)
   window.cancelAnimationFrame(previewSyncFrame)
   window.cancelAnimationFrame(editorSyncFrame)
   editorInstance.value?.dispose()
@@ -892,6 +958,12 @@ watch(theme, () => {
   --vscode-hover-bg: #2a2d2e;
   --vscode-panel-bg: #1f1f1f;
   --vscode-inline-code: rgba(110, 118, 129, 0.22);
+  --vscode-code-comment: #6a9955;
+  --vscode-code-keyword: #c586c0;
+  --vscode-code-string: #ce9178;
+  --vscode-code-number: #b5cea8;
+  --vscode-code-function: #dcdcaa;
+  --vscode-code-variable: #9cdcfe;
   display: grid;
   grid-template-rows: 35px minmax(0, 1fr) 24px;
   width: 100%;
@@ -921,6 +993,12 @@ watch(theme, () => {
   --vscode-hover-bg: #eef2f6;
   --vscode-panel-bg: #f6f8fa;
   --vscode-inline-code: rgba(175, 184, 193, 0.2);
+  --vscode-code-comment: #6a737d;
+  --vscode-code-keyword: #d73a49;
+  --vscode-code-string: #032f62;
+  --vscode-code-number: #005cc5;
+  --vscode-code-function: #6f42c1;
+  --vscode-code-variable: #24292e;
   background: #ffffff;
 }
 
@@ -1255,6 +1333,7 @@ watch(theme, () => {
 .pane-body-editor,
 .pane-body-preview {
   height: 100%;
+  background: var(--vscode-editor-bg);
 }
 
 .monaco-host,
@@ -1269,7 +1348,7 @@ watch(theme, () => {
 
 .sidebar-splitter {
   position: relative;
-  width: 4px;
+  width: 8px;
   cursor: col-resize;
   background: var(--vscode-panel-bg);
 }
@@ -1277,7 +1356,7 @@ watch(theme, () => {
 .sidebar-splitter::before {
   content: "";
   position: absolute;
-  inset: 0 1px;
+  inset: 0 3px;
   background: var(--vscode-border-strong);
 }
 
@@ -1288,6 +1367,7 @@ watch(theme, () => {
 .splitter {
   cursor: col-resize;
   background: var(--vscode-panel-bg);
+  position: relative;
 }
 
 .splitter::before {
@@ -1301,6 +1381,32 @@ watch(theme, () => {
 
 .splitter:hover::before {
   background: var(--vscode-accent);
+}
+
+.splitter-grip {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 16px;
+  height: 42px;
+  transform: translate(-50%, -50%);
+  border-radius: 999px;
+  background:
+    linear-gradient(to right,
+      transparent 0,
+      transparent 4px,
+      var(--vscode-text-faint) 4px,
+      var(--vscode-text-faint) 5px,
+      transparent 5px,
+      transparent 7px,
+      var(--vscode-text-faint) 7px,
+      var(--vscode-text-faint) 8px,
+      transparent 8px,
+      transparent 10px,
+      var(--vscode-text-faint) 10px,
+      var(--vscode-text-faint) 11px,
+      transparent 11px);
+  opacity: 0.8;
 }
 
 .markdown-preview {
@@ -1443,7 +1549,7 @@ watch(theme, () => {
 
 .markdown-preview :deep(.hljs-comment),
 .markdown-preview :deep(.hljs-quote) {
-  color: #6a9955;
+  color: var(--vscode-code-comment);
 }
 
 .markdown-preview :deep(.hljs-keyword),
@@ -1451,7 +1557,7 @@ watch(theme, () => {
 .markdown-preview :deep(.hljs-literal),
 .markdown-preview :deep(.hljs-section),
 .markdown-preview :deep(.hljs-link) {
-  color: #c586c0;
+  color: var(--vscode-code-keyword);
 }
 
 .markdown-preview :deep(.hljs-string),
@@ -1462,25 +1568,25 @@ watch(theme, () => {
 .markdown-preview :deep(.hljs-symbol),
 .markdown-preview :deep(.hljs-bullet),
 .markdown-preview :deep(.hljs-addition) {
-  color: #ce9178;
+  color: var(--vscode-code-string);
 }
 
 .markdown-preview :deep(.hljs-number),
 .markdown-preview :deep(.hljs-meta),
 .markdown-preview :deep(.hljs-built_in),
 .markdown-preview :deep(.hljs-builtin-name) {
-  color: #b5cea8;
+  color: var(--vscode-code-number);
 }
 
 .markdown-preview :deep(.hljs-function),
 .markdown-preview :deep(.hljs-title.function_) {
-  color: #dcdcaa;
+  color: var(--vscode-code-function);
 }
 
 .markdown-preview :deep(.hljs-variable),
 .markdown-preview :deep(.hljs-template-variable),
 .markdown-preview :deep(.hljs-params) {
-  color: #9cdcfe;
+  color: var(--vscode-code-variable);
 }
 
 .markdown-preview :deep(table) {
@@ -1536,6 +1642,36 @@ watch(theme, () => {
   gap: 14px;
   min-width: 0;
   white-space: nowrap;
+}
+
+.context-menu {
+  position: fixed;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  min-width: 150px;
+  padding: 6px 0;
+  border: 1px solid var(--vscode-border-strong);
+  background: var(--vscode-panel-bg);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.22);
+}
+
+.context-menu-item {
+  height: 30px;
+  padding: 0 12px;
+  border: 0;
+  background: transparent;
+  color: var(--vscode-text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.context-menu-item:hover {
+  background: var(--vscode-hover-bg);
+}
+
+.context-menu-item.danger {
+  color: #e5534b;
 }
 
 .is-editor-focused .pane-editor,
