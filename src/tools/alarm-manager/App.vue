@@ -36,6 +36,9 @@
           <li v-for="alarm in sortedAlarms" :key="alarm.id" class="alarm-card"
             :class="{ 'selection-mode': isSelectionMode, selected: isAlarmSelected(alarm.id) }"
             @click="handleAlarmCardClick(alarm)"
+            @mousedown.left="startAlarmLongPress($event, alarm)"
+            @mouseup="clearAlarmLongPress"
+            @mouseleave="clearAlarmLongPress"
             @contextmenu.prevent="openAlarmContextMenu($event, alarm)">
             <div class="alarm-info">
               <span class="alarm-time" :class="{ active: alarm.enabled }">{{ alarm.time }}</span>
@@ -87,22 +90,26 @@
       </div>
 
       <!-- 秒表页面 -->
-      <div v-if="currentTab === 'stopwatch'" class="tab-content centered-content">
-        <div class="stopwatch-display">{{ formatStopwatch(stopwatchTime) }}</div>
-        <div class="stopwatch-controls">
-          <button class="control-btn btn-reset" v-if="stopwatchRunning || stopwatchTime > 0" @click="resetStopwatch">
-            {{ stopwatchRunning ? '计次' : '重设' }}
-          </button>
-          <button class="control-btn btn-start" :class="{ 'btn-stop': stopwatchRunning }" @click="toggleStopwatch">
-            {{ stopwatchRunning ? '停止' : '启动' }}
-          </button>
+      <div v-if="currentTab === 'stopwatch'" class="tab-content stopwatch-content">
+        <div class="stopwatch-main">
+          <div class="stopwatch-display">{{ formatStopwatch(stopwatchTime) }}</div>
+          <div class="stopwatch-controls">
+            <button class="control-btn btn-reset" v-if="stopwatchRunning || stopwatchTime > 0" @click="resetStopwatch">
+              {{ stopwatchRunning ? '计次' : '重设' }}
+            </button>
+            <button class="control-btn btn-start" :class="{ 'btn-stop': stopwatchRunning }" @click="toggleStopwatch">
+              {{ stopwatchRunning ? '停止' : '启动' }}
+            </button>
+          </div>
         </div>
-        <ul class="lap-list" v-if="laps.length > 0">
-          <li v-for="(lap, index) in laps" :key="index" class="lap-item">
-            <span>计次 {{ laps.length - index }}</span>
-            <span>{{ formatStopwatch(lap) }}</span>
-          </li>
-        </ul>
+        <div class="stopwatch-laps" v-if="laps.length > 0">
+          <ul class="lap-list">
+            <li v-for="(lap, index) in laps" :key="index" class="lap-item">
+              <span>计次 {{ laps.length - index }}</span>
+              <span>{{ formatStopwatch(lap) }}</span>
+            </li>
+          </ul>
+        </div>
       </div>
 
       <!-- 计时器页面 -->
@@ -505,6 +512,8 @@ const selectedAlarmIds = ref<string[]>([])
 const deleteTargetIds = ref<string[]>([])
 const appContainerRef = ref<HTMLElement | null>(null)
 const contextMenu = reactive({ visible: false, x: 0, y: 0, alarmId: null as string | null })
+let alarmLongPressTimeoutId: number | null = null
+let suppressAlarmClickId: string | null = null
 
 // 当前系统通知对应的状态，用于处理 SW 回调与稍后提醒
 const activeNotification = ref<{ alarm: Alarm; snoozeRemaining: number } | null>(null)
@@ -793,6 +802,7 @@ const handleGlobalMouseMove = (e: MouseEvent) => {
 }
 
 const handleGlobalMouseUp = () => {
+  clearAlarmLongPress()
   if (!mouseDragType) return
   snapToGrid(mouseDragType)
   mouseDragType = null
@@ -1306,29 +1316,28 @@ const saveTimezoneOffset = async (offset: number) => {
 const formatUtcOffset = (offset: number) => `UTC${offset >= 0 ? '+' : ''}${offset}`
 
 const getDateForTimezoneOffset = (offset: number) => {
-  const utcNow = Date.now() + new Date().getTimezoneOffset() * 60000
-  return new Date(utcNow + offset * 60 * 60 * 1000)
+  const systemOffset = -new Date().getTimezoneOffset() / 60
+  const deltaHours = offset - systemOffset
+  return new Date(Date.now() + deltaHours * 60 * 60 * 1000)
 }
 
 const updateClockDisplay = () => {
   const displayDate = getDateForTimezoneOffset(currentTimezoneOffset.value)
-  currentTimeStr.value = new Intl.DateTimeFormat('zh-CN', {
+  currentTimeStr.value = displayDate.toLocaleTimeString('zh-CN', {
     hour: '2-digit',
     minute: '2-digit',
     second: '2-digit',
-    hour12: false,
-    timeZone: 'UTC'
-  }).format(displayDate)
-  currentDateStr.value = new Intl.DateTimeFormat('zh-CN', {
+    hour12: false
+  })
+  currentDateStr.value = displayDate.toLocaleDateString('zh-CN', {
     month: 'long',
     day: 'numeric',
-    weekday: 'long',
-    timeZone: 'UTC'
-  }).format(displayDate)
+    weekday: 'long'
+  })
 
-  const seconds = displayDate.getUTCSeconds()
-  const minutes = displayDate.getUTCMinutes()
-  const hours = displayDate.getUTCHours()
+  const seconds = displayDate.getSeconds()
+  const minutes = displayDate.getMinutes()
+  const hours = displayDate.getHours()
 
   clockHands.second = seconds * 6
   clockHands.minute = minutes * 6 + seconds * 0.1
@@ -1367,7 +1376,27 @@ const closeAlarmContextMenu = () => {
   contextMenu.alarmId = null
 }
 
+const clearAlarmLongPress = () => {
+  if (alarmLongPressTimeoutId) {
+    clearTimeout(alarmLongPressTimeoutId)
+    alarmLongPressTimeoutId = null
+  }
+}
+
+const startAlarmLongPress = (event: MouseEvent, alarm: Alarm) => {
+  if (event.button !== 0 || isSelectionMode.value) return
+  clearAlarmLongPress()
+  alarmLongPressTimeoutId = window.setTimeout(() => {
+    isSelectionMode.value = true
+    selectedAlarmIds.value = [alarm.id]
+    suppressAlarmClickId = alarm.id
+    closeAlarmContextMenu()
+    alarmLongPressTimeoutId = null
+  }, 450)
+}
+
 const openAlarmContextMenu = (event: MouseEvent, alarm: Alarm) => {
+  clearAlarmLongPress()
   closeAlarmContextMenu()
   const containerRect = appContainerRef.value?.getBoundingClientRect()
   if (!containerRect) return
@@ -1393,9 +1422,15 @@ const toggleSelectedAlarm = (alarmId: string) => {
 const cancelSelectionMode = () => {
   isSelectionMode.value = false
   selectedAlarmIds.value = []
+  suppressAlarmClickId = null
 }
 
 const handleAlarmCardClick = (alarm: Alarm) => {
+  if (suppressAlarmClickId === alarm.id) {
+    suppressAlarmClickId = null
+    return
+  }
+
   if (isSelectionMode.value) {
     toggleSelectedAlarm(alarm.id)
     return

@@ -840,6 +840,8 @@ input:checked+.slider:before {
   background-color: rgba(0,0,0,0.5);
   padding: 5px 10px;
   border-radius: 8px;
+  z-index: 6;
+  pointer-events: none;
 }
 
 .date-display {
@@ -853,6 +855,19 @@ input:checked+.slider:before {
   color: var(--text-primary);
   font-weight: 600;
   margin-bottom: 4px;
+}
+
+.stopwatch-content {
+  justify-content: flex-start;
+  align-items: stretch;
+  padding-top: 32px;
+}
+
+.stopwatch-main {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
 }
 
 /* 秒表 */
@@ -909,11 +924,15 @@ input:checked+.slider:before {
 
 .lap-list {
   width: 100%;
-  padding: 0 20px;
+  padding: 0;
   list-style: none;
   margin: 0;
-  max-height: 300px;
+}
+
+.stopwatch-laps {
+  flex: 1;
   overflow-y: auto;
+  padding: 0 20px 20px;
 }
 
 .lap-item {
