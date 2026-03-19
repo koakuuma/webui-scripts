@@ -34,7 +34,7 @@
                 :class="{ 'is-active': file.id === activeFileId }"
                 type="button"
                 @click="selectFile(file.id)"
-                @contextmenu.prevent="openFileContextMenu($event, file.id)"
+                @contextmenu="openFileContextMenu($event, file.id)"
               >
                 <span class="file-icon">M</span>
                 <span class="file-name">{{ file.name }}</span>
@@ -66,7 +66,9 @@
         </div>
       </aside>
 
-      <div class="sidebar-splitter" aria-hidden="true" @mousedown.prevent="startSidebarResize"></div>
+      <div class="sidebar-splitter" aria-hidden="true" @mousedown.prevent="startSidebarResize">
+        <span class="splitter-grip"></span>
+      </div>
 
       <section class="editor-area">
         <div class="editor-tabs">

@@ -348,30 +348,18 @@
   background: #5a5a5a;
 }
 
-.sidebar-splitter {
-  position: relative;
-  width: 8px;
-  cursor: col-resize;
-  background: var(--vscode-panel-bg);
-}
-
-.sidebar-splitter::before {
-  content: "";
-  position: absolute;
-  inset: 0 3px;
-  background: var(--vscode-border-strong);
-}
-
-.sidebar-splitter:hover::before {
-  background: var(--vscode-accent);
-}
-
+.sidebar-splitter,
 .splitter {
   cursor: col-resize;
   background: var(--vscode-panel-bg);
   position: relative;
 }
 
+.sidebar-splitter {
+  width: 8px;
+}
+
+.sidebar-splitter::before,
 .splitter::before {
   content: "";
   display: block;
@@ -381,6 +369,7 @@
   background: var(--vscode-border-strong);
 }
 
+.sidebar-splitter:hover::before,
 .splitter:hover::before {
   background: var(--vscode-accent);
 }
@@ -412,6 +401,7 @@
   transition: opacity 140ms ease, transform 140ms ease;
 }
 
+.sidebar-splitter:hover .splitter-grip,
 .splitter:hover .splitter-grip {
   opacity: 1;
   transform: translate(-50%, -50%) scale(1.04);

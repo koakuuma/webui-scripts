@@ -126,6 +126,7 @@ let editorSyncFrame = 0
 let renderTimer = 0
 let renderVersion = 0
 let untypedFenceDecorations: string[] = []
+let nativeContextMenuArmed: { scope: 'editor' | 'file'; key: string } | null = null
 
 const activeFile = computed(() => files.value.find((file) => file.id === activeFileId.value) ?? null)
 const activeContent = computed(() => activeFile.value?.content ?? '')
@@ -754,7 +755,13 @@ function openProjectLink() {
 }
 
 function openFileContextMenu(event: MouseEvent, fileId: string) {
-  closeEditorContextMenu()
+  if (shouldAllowNativeContextMenu('file', fileId)) {
+    closeContextMenu(false)
+    return
+  }
+
+  event.preventDefault()
+  closeEditorContextMenu(false)
   contextMenu.value = {
     visible: true,
     x: event.clientX,
@@ -763,12 +770,21 @@ function openFileContextMenu(event: MouseEvent, fileId: string) {
   }
 }
 
-function closeContextMenu() {
+function closeContextMenu(resetNativeContextMenu = true) {
   contextMenu.value.visible = false
+  if (resetNativeContextMenu) {
+    nativeContextMenuArmed = null
+  }
 }
 
 function openEditorContextMenu(event: MouseEvent) {
-  closeContextMenu()
+  if (shouldAllowNativeContextMenu('editor', activeFileId.value || 'editor')) {
+    closeEditorContextMenu(false)
+    return
+  }
+
+  event.preventDefault()
+  closeContextMenu(false)
   editorContextMenu.value = {
     visible: true,
     x: event.clientX,
@@ -776,8 +792,17 @@ function openEditorContextMenu(event: MouseEvent) {
   }
 }
 
-function closeEditorContextMenu() {
+function closeEditorContextMenu(resetNativeContextMenu = true) {
   editorContextMenu.value.visible = false
+  if (resetNativeContextMenu) {
+    nativeContextMenuArmed = null
+  }
+}
+
+function shouldAllowNativeContextMenu(scope: 'editor' | 'file', key: string) {
+  const sameTarget = nativeContextMenuArmed?.scope === scope && nativeContextMenuArmed?.key === key
+  nativeContextMenuArmed = sameTarget ? null : { scope, key }
+  return sameTarget
 }
 
 function startRenameFile(fileId: string) {
