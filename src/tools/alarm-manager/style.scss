@@ -81,6 +81,12 @@ body {
   justify-content: center;
 }
 
+.text-action-btn {
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+}
+
 /* 内容区域 */
 .content-area {
   flex: 1;
@@ -745,6 +751,12 @@ input:checked+.slider:before {
   color: var(--text-secondary);
   font-size: 16px;
   line-height: 1.5;
+}
+
+.timezone-label {
+  color: var(--text-primary);
+  font-weight: 600;
+  margin-bottom: 4px;
 }
 
 /* 秒表 */

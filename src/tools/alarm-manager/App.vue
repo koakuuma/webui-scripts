@@ -5,7 +5,7 @@
       <div class="app-title">{{ currentTabName }}</div>
       <div class="top-actions">
         <button class="icon-btn" v-if="currentTab === 'alarm'" @click="openModal()">+</button>
-        <button class="icon-btn" v-if="currentTab === 'world-clock'" @click="addWorldClock">+</button>
+        <button class="icon-btn text-action-btn" v-if="currentTab === 'world-clock'" @click="openTimezoneModal">UTC</button>
         <button class="icon-btn">⋮</button>
       </div>
     </div>
@@ -50,8 +50,24 @@
           <div class="digital-time">{{ currentTimeStr }}</div>
         </div>
         <div class="date-display">
-          <div>中国标准时间</div>
+          <div class="timezone-label">{{ currentTimezoneLabel }}</div>
           <div>{{ currentDateStr }}</div>
+        </div>
+      </div>
+
+      <div class="sub-page" :class="{ active: isTimezoneModalActive }">
+        <div class="edit-header">
+          <button class="btn-cancel" @click="closeTimezoneModal">返回</button>
+          <span class="edit-title">当前时区</span>
+          <div style="width: 40px;"></div>
+        </div>
+        <div class="section-header">选择 UTC 偏移</div>
+        <div class="list-container">
+          <div v-for="offset in timezoneOffsetOptions" :key="offset" class="list-item" @click="selectTimezoneOffset(offset)">
+            <span>{{ formatUtcOffset(offset) }}</span>
+            <span class="check-icon" v-if="currentTimezoneOffset === offset">●</span>
+            <span class="radio-icon" v-else>○</span>
+          </div>
         </div>
       </div>
 
@@ -425,6 +441,10 @@ const repeatModes: { value: RepeatMode; label: string; desc: string }[] = [
   { value: 'daily', label: '每天', desc: '' },
   { value: 'custom', label: '自定义', desc: '' },
 ]
+const timezoneOffsetOptions = Array.from({ length: 27 }, (_, index) => index - 12)
+const WORLD_CLOCK_DB_NAME = 'alarm-manager-settings'
+const WORLD_CLOCK_STORE_NAME = 'settings'
+const WORLD_CLOCK_TIMEZONE_KEY = 'worldClockUtcOffset'
 
 const snoozeIntervalOptions = [
   { value: 0.5, label: '30 秒' },
@@ -448,6 +468,7 @@ const isModalActive = ref(false)
 const isRepeatModalActive = ref(false)
 const isSnoozeModalActive = ref(false)
 const isDatePickerActive = ref(false)
+const isTimezoneModalActive = ref(false)
 const isLabelModalActive = ref(false)
 const isDeleteConfirmActive = ref(false)
 const labelInputTemp = ref('')
@@ -455,6 +476,7 @@ const editingId = ref<string | null>(null)
 const nextAlarmTip = ref('')
 const currentTick = ref(Date.now())
 const snoozeAlarmId = ref<string | null>(null)
+const currentTimezoneOffset = ref(8)
 
 // 当前系统通知对应的状态，用于处理 SW 回调与稍后提醒
 const activeNotification = ref<{ alarm: Alarm; snoozeRemaining: number } | null>(null)
@@ -577,6 +599,8 @@ const currentTabName = computed(() => {
   return map[currentTab.value]
 })
 
+const currentTimezoneLabel = computed(() => formatUtcOffset(currentTimezoneOffset.value))
+
 const sortedAlarms = computed(() => {
   return [...alarms.value].sort((a, b) => a.time.localeCompare(b.time))
 })
@@ -599,6 +623,7 @@ onMounted(() => {
   updateNextAlarmTip()  // 首次调用时会通过 _setTipInterval 自动设置刷新间隔
   startClock()
   initTimerWheel(timerInput.hours, timerInput.minutes, timerInput.seconds)
+  void loadStoredTimezoneOffset()
 
   // 注册 Service Worker
   if ('serviceWorker' in navigator) {
@@ -1187,6 +1212,110 @@ const getCurrentMinuteInfo = () => {
   return { currentDay, currentTimeStr, currentFullTime, currentDateStr }
 }
 
+const openSettingsDb = () => new Promise<IDBDatabase>((resolve, reject) => {
+  const request = window.indexedDB.open(WORLD_CLOCK_DB_NAME, 1)
+
+  request.onupgradeneeded = () => {
+    const db = request.result
+    if (!db.objectStoreNames.contains(WORLD_CLOCK_STORE_NAME)) {
+      db.createObjectStore(WORLD_CLOCK_STORE_NAME)
+    }
+  }
+
+  request.onsuccess = () => resolve(request.result)
+  request.onerror = () => reject(request.error)
+})
+
+const getStoredTimezoneOffset = async () => {
+  try {
+    const db = await openSettingsDb()
+    return await new Promise<number | null>((resolve, reject) => {
+      const transaction = db.transaction(WORLD_CLOCK_STORE_NAME, 'readonly')
+      const store = transaction.objectStore(WORLD_CLOCK_STORE_NAME)
+      const request = store.get(WORLD_CLOCK_TIMEZONE_KEY)
+
+      request.onsuccess = () => {
+        const value = request.result
+        resolve(typeof value === 'number' ? value : null)
+      }
+      request.onerror = () => reject(request.error)
+      transaction.oncomplete = () => db.close()
+    })
+  } catch {
+    return null
+  }
+}
+
+const saveTimezoneOffset = async (offset: number) => {
+  const db = await openSettingsDb()
+  return new Promise<void>((resolve, reject) => {
+    const transaction = db.transaction(WORLD_CLOCK_STORE_NAME, 'readwrite')
+    const store = transaction.objectStore(WORLD_CLOCK_STORE_NAME)
+    store.put(offset, WORLD_CLOCK_TIMEZONE_KEY)
+
+    transaction.oncomplete = () => {
+      db.close()
+      resolve()
+    }
+    transaction.onerror = () => reject(transaction.error)
+  })
+}
+
+const formatUtcOffset = (offset: number) => `UTC${offset >= 0 ? '+' : ''}${offset}`
+
+const getDateForTimezoneOffset = (offset: number) => {
+  const utcNow = Date.now() + new Date().getTimezoneOffset() * 60000
+  return new Date(utcNow + offset * 60 * 60 * 1000)
+}
+
+const updateClockDisplay = () => {
+  const displayDate = getDateForTimezoneOffset(currentTimezoneOffset.value)
+  currentTimeStr.value = new Intl.DateTimeFormat('zh-CN', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+    timeZone: 'UTC'
+  }).format(displayDate)
+  currentDateStr.value = new Intl.DateTimeFormat('zh-CN', {
+    month: 'long',
+    day: 'numeric',
+    weekday: 'long',
+    timeZone: 'UTC'
+  }).format(displayDate)
+
+  const seconds = displayDate.getUTCSeconds()
+  const minutes = displayDate.getUTCMinutes()
+  const hours = displayDate.getUTCHours()
+
+  clockHands.second = seconds * 6
+  clockHands.minute = minutes * 6 + seconds * 0.1
+  clockHands.hour = (hours % 12) * 30 + minutes * 0.5
+}
+
+const loadStoredTimezoneOffset = async () => {
+  const storedOffset = await getStoredTimezoneOffset()
+  if (typeof storedOffset === 'number') {
+    currentTimezoneOffset.value = storedOffset
+    updateClockDisplay()
+  }
+}
+
+const openTimezoneModal = () => {
+  isTimezoneModalActive.value = true
+}
+
+const closeTimezoneModal = () => {
+  isTimezoneModalActive.value = false
+}
+
+const selectTimezoneOffset = (offset: number) => {
+  currentTimezoneOffset.value = offset
+  updateClockDisplay()
+  closeTimezoneModal()
+  void saveTimezoneOffset(offset)
+}
+
 const getCurrentMinuteTriggerMark = (alarm: Pick<Alarm, 'time' | 'repeatMode' | 'days' | 'specificDate'>) => {
   const { currentDay, currentTimeStr, currentFullTime, currentDateStr } = getCurrentMinuteInfo()
 
@@ -1404,25 +1533,8 @@ const snapDateToGrid = (type: 'year' | 'month' | 'day') => {
 
 
 const startClock = () => {
-  const update = () => {
-    const now = new Date()
-    currentTimeStr.value = now.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
-    currentDateStr.value = now.toLocaleDateString('zh-CN', { month: 'long', day: 'numeric', weekday: 'long' })
-
-    const seconds = now.getSeconds()
-    const minutes = now.getMinutes()
-    const hours = now.getHours()
-
-    clockHands.second = seconds * 6
-    clockHands.minute = minutes * 6 + seconds * 0.1
-    clockHands.hour = (hours % 12) * 30 + minutes * 0.5
-  }
-  update()
-  clockInterval = window.setInterval(update, 1000)
-}
-
-const addWorldClock = () => {
-  alert('添加世界时钟功能开发中...')
+  updateClockDisplay()
+  clockInterval = window.setInterval(updateClockDisplay, 1000)
 }
 
 // --- 秒表功能 ---
