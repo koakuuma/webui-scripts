@@ -151,6 +151,7 @@ body {
 .alarm-info {
   display: flex;
   flex-direction: column;
+  min-width: 0;
 }
 
 .alarm-time {
@@ -168,6 +169,22 @@ body {
 .alarm-meta {
   font-size: 14px;
   color: var(--text-secondary);
+  min-width: 0;
+  flex: 1;
+}
+
+.alarm-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.alarm-snooze-badge {
+  font-size: 13px;
+  color: var(--accent-color);
+  font-weight: 500;
+  white-space: nowrap;
 }
 
 /* 开关样式 */
@@ -325,11 +342,8 @@ input:checked+.slider:before {
   width: 80px;
   height: 100%;
   position: relative;
-  cursor: grab;
-  
-  &:active {
-    cursor: grabbing;
-  }
+  cursor: ns-resize;
+  user-select: none;
 }
 
 .wheel-list {
@@ -484,6 +498,171 @@ input:checked+.slider:before {
 
 .radio-icon {
   color: var(--text-secondary);
+}
+
+/* 重复模式单选列表 */
+.repeat-mode-item {
+  align-items: flex-start;
+  padding: 16px 15px;
+}
+
+.repeat-mode-text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+}
+
+.repeat-mode-label {
+  font-size: 16px;
+  color: var(--text-primary);
+}
+
+.repeat-mode-desc {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+  max-width: 260px;
+}
+
+.radio-check {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid var(--text-secondary);
+  flex-shrink: 0;
+  margin-top: 1px;
+
+  &.filled {
+    border-color: #34c759;
+    background-color: #34c759;
+    position: relative;
+
+    &::after {
+      content: '';
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background-color: #fff;
+    }
+  }
+}
+
+.custom-days-section {
+  margin-top: 10px;
+}
+
+/* 日期选择器列宽调整 */
+.date-col {
+  width: 100px;
+}
+
+/* 通用对话框遮罩 */
+.dialog-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  z-index: 500;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding-bottom: 20px;
+}
+
+.dialog-box {
+  background: #2c2c2e;
+  border-radius: 20px;
+  padding: 24px 20px 10px;
+  width: calc(100% - 40px);
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+}
+
+.dialog-title {
+  text-align: center;
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 4px;
+}
+
+.dialog-input-wrap {
+  position: relative;
+  border-bottom: 1px solid var(--accent-color);
+  display: flex;
+  align-items: center;
+}
+
+.dialog-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text-primary);
+  font-size: 16px;
+  padding: 8px 4px;
+  caret-color: var(--accent-color);
+
+  &::placeholder {
+    color: var(--text-secondary);
+  }
+}
+
+.dialog-input-clear {
+  background: #555;
+  border: none;
+  border-radius: 50%;
+  color: #fff;
+  width: 18px;
+  height: 18px;
+  font-size: 11px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.dialog-confirm {
+  background: transparent;
+  border: 1.5px solid var(--accent-color);
+  border-radius: 50px;
+  color: var(--accent-color);
+  font-size: 16px;
+  padding: 12px;
+  cursor: pointer;
+  font-weight: 500;
+  transition: background 0.15s;
+
+  &:active {
+    background: rgba(255, 159, 10, 0.15);
+  }
+
+  &.danger {
+    border-color: var(--danger-color);
+    color: var(--danger-color);
+
+    &:active {
+      background: rgba(255, 69, 58, 0.15);
+    }
+  }
+}
+
+.dialog-cancel-text {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 15px;
+  padding: 8px;
+  cursor: pointer;
+  text-align: center;
+  margin-bottom: 4px;
 }
 
 /* 世界时钟 */
@@ -687,6 +866,38 @@ input:checked+.slider:before {
   padding-top: 40px;
 }
 
+.timer-wheel-picker-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 220px;
+  margin-bottom: 18px;
+  position: relative;
+  overflow: hidden;
+  mask-image: linear-gradient(to bottom, transparent, black 18%, black 82%, transparent);
+  -webkit-mask-image: linear-gradient(to bottom, transparent, black 18%, black 82%, transparent);
+}
+
+.timer-wheel {
+  width: 84px;
+}
+
+.timer-wheel-label {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 18px;
+  color: var(--text-primary);
+  pointer-events: none;
+}
+
+.timer-wheel-highlight {
+  width: 270px;
+}
+
 .preset-timers {
   width: 100%;
   padding: 20px;
@@ -737,25 +948,12 @@ input:checked+.slider:before {
 }
 
 /* 计时器输入框样式复用 time-picker 但更紧凑 */
-.time-picker.compact {
-  height: 150px;
-  margin-bottom: 10px;
-}
+.timer-wheel-picker-container .wheel-item {
+  font-size: 34px;
+  font-weight: 300;
 
-.time-input {
-  background: transparent;
-  border: none;
-  color: inherit;
-  font-size: inherit;
-  font-family: inherit;
-  width: 2ch;
-  text-align: center;
-  outline: none;
-  -moz-appearance: textfield;
-  
-  &::-webkit-outer-spin-button,
-  &::-webkit-inner-spin-button {
-    -webkit-appearance: none;
-    margin: 0;
+  &.active {
+    font-size: 44px;
+    font-weight: 400;
   }
 }
