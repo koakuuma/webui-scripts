@@ -18,46 +18,45 @@
         </select>
       </div>
     </div>
+
     <div class="editor-container">
       <section class="pane editor-pane">
         <div class="pane-toolbar">
           <span class="pane-label">编辑器</span>
           <span class="pane-meta">{{ lineCount }} 行</span>
         </div>
-        <div class="editor-scroll-container" ref="editorScrollContainer" @scroll="handleEditorScroll">
-          <div class="line-numbers" ref="lineNumbers" v-html="lineNumbersHTML"></div>
-          <textarea
-            id="editor"
-            ref="editor"
-            v-model="content"
-            spellcheck="false"
-            @input="handleInput"
-            @scroll="handleTextareaScroll"
-          ></textarea>
-        </div>
+        <div ref="editorHost" class="monaco-host"></div>
       </section>
+
       <div class="splitter" aria-hidden="true"></div>
+
       <section class="pane preview-pane">
         <div class="pane-toolbar">
           <span class="pane-label">预览</span>
         </div>
-        <div class="preview-scroll-container" ref="previewScrollContainer" @scroll="handlePreviewScroll">
+        <div ref="previewScrollContainer" class="preview-scroll-container" @scroll="handlePreviewScroll">
           <article id="preview" ref="preview" class="markdown-preview" v-html="renderedContent"></article>
         </div>
       </section>
     </div>
+
     <div class="status-bar">
       <span>{{ lineCount }} 行</span>
       <span>{{ wordCount }} 词</span>
+      <span>{{ currentThemeLabel }}</span>
     </div>
   </div>
+
   <div class="tooltip" :class="{ show: tooltip.show }">{{ tooltip.message }}</div>
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, shallowRef, watch } from 'vue'
 import MarkdownIt from 'markdown-it'
 import hljs from 'highlight.js'
+import * as monaco from 'monaco-editor'
+import EditorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker'
+import 'monaco-editor/esm/vs/basic-languages/markdown/markdown.contribution'
 // @ts-ignore
 import renderMathInElement from 'katex/dist/contrib/auto-render'
 
@@ -93,7 +92,7 @@ const themes: Record<string, Theme> = {
       '--button-border': 'rgba(255, 255, 255, 0.1)',
       '--input-bg': '#111827',
       '--input-border': 'rgba(255, 255, 255, 0.12)',
-      '--code-bg': '#11161f',
+      '--code-bg': '#0c111b',
       '--inline-code-bg': 'rgba(110, 118, 129, 0.18)',
       '--blockquote-bg': 'rgba(86, 156, 214, 0.08)',
       '--blockquote-border': '#569cd6',
@@ -213,26 +212,24 @@ const themes: Record<string, Theme> = {
   }
 }
 
-const editorViewportTop = 18
-
 const content = ref('')
 const renderedContent = ref('')
 const currentTheme = ref('vscode-dark')
 const syncMode = ref('to-preview')
 const tooltip = ref({ show: false, message: '' })
-const lineNumbersHTML = ref('')
 
-const editor = ref<HTMLTextAreaElement | null>(null)
-const editorScrollContainer = ref<HTMLElement | null>(null)
+const editorHost = ref<HTMLElement | null>(null)
 const previewScrollContainer = ref<HTMLElement | null>(null)
-const lineNumbers = ref<HTMLElement | null>(null)
 const preview = ref<HTMLElement | null>(null)
+const editorInstance = shallowRef<monaco.editor.IStandaloneCodeEditor | null>(null)
 
 const lineCount = computed(() => content.value.split('\n').length)
 const wordCount = computed(() => {
   const matches = content.value.trim().match(/[\u4e00-\u9fa5]|[A-Za-z0-9_]+/g)
   return matches ? matches.length : 0
 })
+const currentThemeLabel = computed(() => themes[currentTheme.value]?.name ?? '')
+
 let syncingEditor = false
 let syncingPreview = false
 let scrollMap: number[] = []
@@ -276,6 +273,66 @@ function renderCodeBlock(contentValue: string, languageName: string, line: numbe
   return `<div class="code-block"${lineAttr}><pre><code class="hljs ${languageClass}">${highlighted}</code></pre></div>\n`
 }
 
+function configureMonacoEnvironment() {
+  ;(globalThis as any).MonacoEnvironment = {
+    getWorker() {
+      return new EditorWorker()
+    }
+  }
+}
+
+function getMonacoThemeName(themeName: string) {
+  return themeName.includes('light') ? 'vs' : 'vs-dark'
+}
+
+function createEditor() {
+  if (!editorHost.value) return
+
+  editorInstance.value = monaco.editor.create(editorHost.value, {
+    value: content.value,
+    language: 'markdown',
+    theme: getMonacoThemeName(currentTheme.value),
+    automaticLayout: true,
+    minimap: { enabled: false },
+    wordWrap: 'on',
+    lineNumbers: 'on',
+    glyphMargin: false,
+    folding: true,
+    lineDecorationsWidth: 10,
+    lineNumbersMinChars: 3,
+    scrollBeyondLastLine: false,
+    smoothScrolling: true,
+    renderLineHighlight: 'line',
+    overviewRulerBorder: false,
+    overviewRulerLanes: 0,
+    hideCursorInOverviewRuler: true,
+    fontFamily: 'Cascadia Code, Cascadia Mono, Consolas, monospace',
+    fontSize: 14,
+    lineHeight: 25,
+    padding: {
+      top: 16,
+      bottom: 24
+    },
+    scrollbar: {
+      vertical: 'hidden',
+      horizontal: 'hidden',
+      alwaysConsumeMouseWheel: false,
+      useShadows: false
+    }
+  })
+
+  editorInstance.value.onDidChangeModelContent(() => {
+    const nextValue = editorInstance.value?.getValue() ?? ''
+    if (nextValue !== content.value) {
+      content.value = nextValue
+    }
+  })
+
+  editorInstance.value.onDidScrollChange(() => {
+    handleEditorScroll()
+  })
+}
+
 md.renderer.rules.heading_open = injectLineNumbers
 md.renderer.rules.paragraph_open = injectLineNumbers
 md.renderer.rules.list_item_open = injectLineNumbers
@@ -293,7 +350,9 @@ md.renderer.rules.fence = (tokens, idx) => {
   return renderCodeBlock(token.content, languageName, line)
 }
 
-onMounted(() => {
+onMounted(async () => {
+  configureMonacoEnvironment()
+
   const savedTheme = localStorage.getItem('markdown-editor-theme')
   if (savedTheme && themes[savedTheme]) {
     currentTheme.value = savedTheme
@@ -308,9 +367,10 @@ onMounted(() => {
   content.value = savedContent || '# Markdown 编辑预览器\n\n## 语法示例\n\n### 代码块\n\n```ts\nfunction greet(name: string) {\n  console.log(`Hello, ${name}`)\n}\n\ngreet("world")\n```\n\n### 表格\n\n| 名称 | 描述 |\n| --- | --- |\n| Markdown | 轻量级标记语言 |\n| KaTeX | 数学公式渲染 |\n| highlight.js | 代码高亮 |\n\n### 数学公式\n\n行内公式: $E=mc^2$\n\n行间公式:\n\n$\\frac{d}{dx}\\left( \\int_{0}^{x} f(u)\\,du\\right)=f(x)$\n\n### 分隔线\n\n---\n\n### 引用\n\n> 这是一个引用示例。\n\n### 任务列表\n\n- [x] 已完成任务\n- [ ] 未完成任务\n'
 
   applyTheme(currentTheme.value)
-  updateLineNumbers()
   renderMarkdown()
-  adjustTextareaHeight()
+
+  await nextTick()
+  createEditor()
 
   document.addEventListener('keydown', handleKeydown)
   window.addEventListener('resize', handleResize)
@@ -323,6 +383,7 @@ onMounted(() => {
 onUnmounted(() => {
   document.removeEventListener('keydown', handleKeydown)
   window.removeEventListener('resize', handleResize)
+  editorInstance.value?.dispose()
 })
 
 watch(currentTheme, (newTheme) => {
@@ -337,23 +398,9 @@ watch(syncMode, (newMode) => {
 })
 
 watch(content, () => {
-  updateLineNumbers()
   renderMarkdown()
-  adjustTextareaHeight()
   saveContentToStorage()
 })
-
-const handleInput = () => {
-}
-
-const updateLineNumbers = () => {
-  const lines = content.value.split('\n')
-  let html = ''
-  for (let i = 0; i < lines.length; i++) {
-    html += `${i + 1}<br>`
-  }
-  lineNumbersHTML.value = html
-}
 
 const renderMarkdown = () => {
   renderedContent.value = md.render(content.value)
@@ -379,21 +426,8 @@ const renderMarkdown = () => {
 }
 
 const handleResize = () => {
-  adjustTextareaHeight()
+  editorInstance.value?.layout()
   buildScrollMap()
-}
-
-const adjustTextareaHeight = () => {
-  if (!editor.value || !editorScrollContainer.value) return
-
-  const currentScrollTop = editorScrollContainer.value.scrollTop
-  const currentScrollLeft = editorScrollContainer.value.scrollLeft
-
-  editor.value.style.height = 'auto'
-  editor.value.style.height = `${editor.value.scrollHeight}px`
-
-  editorScrollContainer.value.scrollTop = currentScrollTop
-  editorScrollContainer.value.scrollLeft = currentScrollLeft
 }
 
 const applyTheme = (themeName: string) => {
@@ -405,22 +439,12 @@ const applyTheme = (themeName: string) => {
   })
 
   document.body.classList.remove('theme-light', 'theme-dark')
-  if (themeName.includes('light')) {
-    document.body.classList.add('theme-light')
-  } else {
-    document.body.classList.add('theme-dark')
-  }
-}
-
-const getEditorLineHeight = () => {
-  if (!editor.value) return 25.2
-  const computedStyle = window.getComputedStyle(editor.value)
-  const lineHeight = parseFloat(computedStyle.lineHeight)
-  return isNaN(lineHeight) ? 25.2 : lineHeight
+  document.body.classList.add(themeName.includes('light') ? 'theme-light' : 'theme-dark')
+  monaco.editor.setTheme(getMonacoThemeName(themeName))
 }
 
 const buildScrollMap = () => {
-  if (!editor.value || !preview.value) return
+  if (!preview.value) return
 
   const lines = content.value.split('\n')
   const nextScrollMap: number[] = []
@@ -466,58 +490,51 @@ const buildScrollMap = () => {
 }
 
 const handleEditorScroll = () => {
-  if (!editorScrollContainer.value || !lineNumbers.value) return
+  if (!editorInstance.value || !previewScrollContainer.value) return
+  if (syncingEditor || syncMode.value !== 'to-preview') return
 
-  lineNumbers.value.style.top = `${editorViewportTop - editorScrollContainer.value.scrollTop}px`
+  syncingPreview = true
 
-  if (!syncingEditor && syncMode.value === 'to-preview' && previewScrollContainer.value && editor.value) {
-    syncingPreview = true
+  const visibleRange = editorInstance.value.getVisibleRanges()[0]
+  const lineNumber = visibleRange?.startLineNumber ?? 1
+  const currentTop = editorInstance.value.getScrollTop()
+  const lineTop = editorInstance.value.getTopForLineNumber(lineNumber)
+  const nextLineTop = editorInstance.value.getTopForLineNumber(lineNumber + 1)
+  const ratio = nextLineTop > lineTop ? (currentTop - lineTop) / (nextLineTop - lineTop) : 0
+  const safeRatio = Math.max(0, Math.min(1, ratio))
+  const base = scrollMap[lineNumber - 1] ?? 0
+  const next = scrollMap[lineNumber] ?? base
 
-    const lineHeight = getEditorLineHeight()
-    const scrollTop = editorScrollContainer.value.scrollTop
-    const lineIndex = Math.floor(scrollTop / lineHeight)
+  previewScrollContainer.value.scrollTo({
+    top: base + (next - base) * safeRatio,
+    behavior: 'auto'
+  })
 
-    if (scrollMap.length > lineIndex) {
-      previewScrollContainer.value.scrollTo({
-        top: scrollMap[lineIndex],
-        behavior: 'auto'
-      })
-    }
-
-    setTimeout(() => {
-      syncingPreview = false
-    }, 50)
-  }
-}
-
-const handleTextareaScroll = () => {
+  setTimeout(() => {
+    syncingPreview = false
+  }, 50)
 }
 
 const handlePreviewScroll = () => {
-  if (!previewScrollContainer.value || !editorScrollContainer.value) return
+  if (!previewScrollContainer.value || !editorInstance.value) return
+  if (syncingPreview || syncMode.value !== 'to-editor') return
 
-  if (!syncingPreview && syncMode.value === 'to-editor') {
-    syncingEditor = true
+  syncingEditor = true
 
-    const scrollTop = previewScrollContainer.value.scrollTop
-    let lineIndex = 0
-    for (let i = 0; i < scrollMap.length; i++) {
-      if (scrollMap[i] > scrollTop) {
-        lineIndex = i
-        break
-      }
+  const scrollTop = previewScrollContainer.value.scrollTop
+  let lineIndex = 0
+  for (let i = 0; i < scrollMap.length; i++) {
+    if (scrollMap[i] > scrollTop) {
+      lineIndex = i
+      break
     }
-
-    const lineHeight = getEditorLineHeight()
-    editorScrollContainer.value.scrollTo({
-      top: lineIndex * lineHeight,
-      behavior: 'auto'
-    })
-
-    setTimeout(() => {
-      syncingEditor = false
-    }, 50)
   }
+
+  editorInstance.value.setScrollTop(editorInstance.value.getTopForLineNumber(Math.max(1, lineIndex + 1)))
+
+  setTimeout(() => {
+    syncingEditor = false
+  }, 50)
 }
 
 const saveContentToStorage = () => {

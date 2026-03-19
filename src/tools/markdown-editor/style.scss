@@ -260,7 +260,7 @@ body {
   background: var(--preview-bg);
 }
 
-.editor-scroll-container,
+.monaco-host,
 .preview-scroll-container {
   position: relative;
   flex: 1;
@@ -269,53 +269,48 @@ body {
   scrollbar-width: none;
 }
 
-.editor-scroll-container::-webkit-scrollbar,
+.monaco-host::-webkit-scrollbar,
 .preview-scroll-container::-webkit-scrollbar,
 #preview :deep(pre)::-webkit-scrollbar {
   display: none;
 }
 
-.editor-scroll-container {
-  padding: 18px 0 24px;
+.monaco-host {
+  overflow: hidden;
 }
 
 .preview-scroll-container {
   padding: 24px 0 32px;
 }
 
-#editor {
-  width: 100%;
-  min-height: 100%;
-  padding: 0 24px 0 72px;
-  background: transparent;
-  color: var(--text-color);
-  border: none;
-  resize: none;
-  overflow: visible;
-  outline: none;
-  font-family: "Cascadia Code", "Cascadia Mono", Consolas, monospace;
-  font-size: 14px;
-  line-height: 1.8;
-  caret-color: var(--k-color-primary);
+.monaco-host .monaco-editor,
+.monaco-host .overflow-guard {
+  background: var(--editor-bg) !important;
 }
 
-#editor::selection {
-  background: var(--selection-bg);
+.monaco-host .monaco-editor .margin,
+.monaco-host .monaco-editor .monaco-editor-background,
+.monaco-host .monaco-editor .inputarea.ime-input {
+  background: var(--editor-bg) !important;
 }
 
-.line-numbers {
-  position: absolute;
-  top: 18px;
-  left: 16px;
-  width: 44px;
-  padding-right: 12px;
-  color: var(--line-number-text-color);
-  background: linear-gradient(90deg, var(--line-number-bg-color), transparent 92%);
-  font-family: "Cascadia Code", "Cascadia Mono", Consolas, monospace;
-  font-size: 14px;
-  line-height: 1.8;
-  text-align: right;
-  user-select: none;
+.monaco-host .monaco-editor .current-line,
+.monaco-host .monaco-editor .current-line-margin {
+  border-color: rgba(255, 255, 255, 0.06) !important;
+}
+
+.monaco-host .monaco-editor .line-numbers {
+  color: var(--line-number-text-color) !important;
+}
+
+.monaco-host .monaco-editor .scroll-decoration,
+.monaco-host .monaco-editor .decorationsOverviewRuler {
+  box-shadow: none !important;
+}
+
+.monaco-host .monaco-editor .scrollbar,
+.monaco-host .monaco-editor .scrollbar .slider {
+  display: none !important;
 }
 
 #preview {
@@ -614,9 +609,8 @@ body {
     padding: 0 18px;
   }
 
-  #editor {
-    padding-right: 16px;
-    padding-left: 64px;
+  .monaco-host {
+    min-height: 320px;
   }
 
   .status-bar {
