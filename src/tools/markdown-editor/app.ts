@@ -345,7 +345,7 @@ function createEditor() {
     readOnly: true,
     scrollbar: {
       vertical: 'visible',
-      horizontal: 'visible',
+      horizontal: 'hidden',
       alwaysConsumeMouseWheel: false,
       useShadows: false,
       verticalScrollbarSize: 10,

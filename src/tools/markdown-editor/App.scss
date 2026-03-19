@@ -474,7 +474,7 @@
 }
 
 .vscode-shell :deep(.monaco-scrollable-element > .scrollbar.horizontal) {
-  height: 12px !important;
+  height: 0 !important;
 }
 
 .vscode-shell :deep(.monaco-scrollable-element > .scrollbar > .slider) {
