@@ -127,12 +127,14 @@ let renderTimer = 0
 let renderVersion = 0
 let untypedFenceDecorations: string[] = []
 let nativeContextMenuArmed: { scope: 'editor' | 'file'; key: string } | null = null
+let renderedCodeBlocks: string[] = []
 
 const activeFile = computed(() => files.value.find((file) => file.id === activeFileId.value) ?? null)
 const activeContent = computed(() => activeFile.value?.content ?? '')
 const lineCount = computed(() => (activeContent.value ? activeContent.value.split('\n').length : 0))
 const cursorStatus = computed(() => `Ln ${cursorLine.value}, Col ${cursorColumn.value}`)
 const titleText = computed(() => activeFile.value?.name ?? 'No File')
+const browserTitle = computed(() => titleText.value.replace(/\.md$/i, ''))
 const markdownUtils = new MarkdownIt().utils
 const escapeHtml = (source: string) => markdownUtils.escapeHtml(source)
 
@@ -175,8 +177,9 @@ function renderCodeBlock(source: string, language: string, line: number | null, 
   const lineAttr = line !== null ? ` data-source-line="${line + 1}"` : ''
   const languageClass = language ? `language-${escapeHtml(language)}` : 'language-plaintext'
   const languageLabel = language ? escapeHtml(language) : 'plaintext'
+  const codeIndex = renderedCodeBlocks.push(source) - 1
 
-  return `<div class="code-block"${lineAttr}><div class="code-block-header">${languageLabel}</div><pre><code class="hljs ${languageClass}">${html}</code></pre></div>\n`
+  return `<div class="code-block"${lineAttr}><button class="code-copy-button" type="button" data-code-index="${codeIndex}" aria-label="Copy code">Copy</button><div class="code-block-header">${languageLabel}</div><pre><code class="hljs ${languageClass}">${html}</code></pre></div>\n`
 }
 
 function enhanceTaskListTokens(state: any) {
@@ -566,6 +569,7 @@ function applyAutoFileName(file: MarkdownFileRecord) {
 
 function renderMarkdownNow(version: number) {
   const file = activeFile.value
+  renderedCodeBlocks = []
   renderedContent.value = file ? md.render(file.content) : ''
 
   nextTick(() => {
@@ -893,6 +897,27 @@ async function copyFromEditor() {
   closeEditorContextMenu()
 }
 
+async function copyTextToClipboard(text: string) {
+  try {
+    await navigator.clipboard.writeText(text)
+    return true
+  } catch {
+    const textArea = document.createElement('textarea')
+    textArea.value = text
+    textArea.setAttribute('readonly', 'true')
+    textArea.style.position = 'fixed'
+    textArea.style.opacity = '0'
+    document.body.appendChild(textArea)
+    textArea.select()
+
+    try {
+      return document.execCommand('copy')
+    } finally {
+      document.body.removeChild(textArea)
+    }
+  }
+}
+
 async function cutFromEditor() {
   if (!editorInstance.value) return
 
@@ -938,6 +963,25 @@ async function pasteIntoEditor() {
   } finally {
     closeEditorContextMenu()
   }
+}
+
+async function handlePreviewClick(event: MouseEvent) {
+  const target = event.target as HTMLElement | null
+  const copyButton = target?.closest('.code-copy-button') as HTMLButtonElement | null
+  if (!copyButton) return
+
+  const codeIndex = Number(copyButton.dataset.codeIndex ?? '-1')
+  const code = renderedCodeBlocks[codeIndex]
+  if (typeof code !== 'string') return
+
+  const copied = await copyTextToClipboard(code)
+  if (!copied) return
+
+  const originalText = copyButton.textContent ?? 'Copy'
+  copyButton.textContent = 'Copied'
+  window.setTimeout(() => {
+    copyButton.textContent = originalText
+  }, 1200)
 }
 
 function handlePointerMove(event: MouseEvent) {
@@ -1062,7 +1106,7 @@ watch(activeContent, () => {
   scheduleRenderMarkdown()
 })
 
-watch(titleText, (value) => {
+watch(browserTitle, (value) => {
   document.title = value
 }, { immediate: true })
 
@@ -1089,6 +1133,7 @@ watch(titleText, (value) => {
       startPreviewResize,
       previewScrollContainer,
       handlePreviewScroll,
+      handlePreviewClick,
       renderedContent,
       cursorStatus,
       lineCount,

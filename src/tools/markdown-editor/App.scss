@@ -574,6 +574,7 @@
 }
 
 .markdown-preview :deep(.code-block) {
+  position: relative;
   border: 1px solid var(--vscode-border);
   background: var(--vscode-preview-code);
   min-width: 0;
@@ -585,11 +586,33 @@
   display: flex;
   align-items: center;
   height: 28px;
-  padding: 0 12px;
+  padding: 0 72px 0 12px;
   border-bottom: 1px solid var(--vscode-border);
   color: var(--vscode-text-muted);
   font-size: 12px;
   text-transform: lowercase;
+}
+
+.markdown-preview :deep(.code-copy-button) {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  height: 18px;
+  padding: 0 8px;
+  border: 1px solid var(--vscode-border-strong);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--vscode-panel-bg) 86%, transparent);
+  color: var(--vscode-text-muted);
+  font-size: 11px;
+  line-height: 16px;
+  cursor: pointer;
+  transition: background-color 140ms ease, color 140ms ease, border-color 140ms ease;
+}
+
+.markdown-preview :deep(.code-copy-button:hover) {
+  border-color: var(--vscode-accent);
+  background: var(--vscode-hover-bg);
+  color: var(--vscode-text);
 }
 
 .markdown-preview :deep(pre) {

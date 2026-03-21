@@ -111,6 +111,7 @@
                 ref="previewScrollContainer"
                 class="preview-scroll-container"
                 @scroll="handlePreviewScroll"
+                @click="handlePreviewClick"
               >
                 <article id="preview" ref="preview" class="markdown-preview" v-html="renderedContent"></article>
               </div>
