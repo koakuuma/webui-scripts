@@ -4,29 +4,40 @@
 
     <div class="description">
       <p>播放按钮</p>
-      <p>黑屏小工具，让你的屏幕保持纯黑色~~~</p>
+      <p>黑屏小工具，让你的屏幕保持纯黑色。</p>
     </div>
 
-    <div ref="fullscreenDiv" class="fullscreen-container" :class="{
-      'active': isFullscreen,
-      'show-cursor': showCursor,
-      'show-message': showMessage
-    }" @click="handleFullscreenClick" @dblclick="handleFullscreenDoubleClick" @mousemove="handleMouseMove">
+    <div
+      ref="fullscreenDiv"
+      class="fullscreen-container"
+      :class="{
+        active: isFullscreen,
+        'show-cursor': showCursor,
+        'show-message': showMessage
+      }"
+      @click="handleFullscreenClick"
+      @mousemove="handleMouseMove"
+    >
       <div class="fullscreen-message">
-        双击或按下 ESC 退出全屏模式
-        <br><br>
-        静置鼠标 <span class="countdown">{{ countdownValue }}</span> 秒后 提示文本将消失...
+        点击鼠标退出全屏
+        <br />
+        <br />
+        鼠标静止 <span class="countdown">{{ countdownValue }}</span> 秒后提示文本将消失
       </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { onMounted, onUnmounted, ref } from 'vue'
+
+type BrowserKeyboardApi = {
+  lock?: (keyCodes?: string[]) => Promise<void>
+  unlock?: () => void
+}
 
 const fullscreenDiv = ref<HTMLElement | null>(null)
 const isFullscreen = ref(false)
-const isPaused = ref(false)
 const canEnterFullscreen = ref(true)
 const showCursor = ref(false)
 const showMessage = ref(false)
@@ -35,38 +46,102 @@ const countdownValue = ref(5)
 const fullscreenCooldown = 500
 const cursorHideDelay = 5000
 const messageDisplayTime = 5000
+const blockedKeyboardEvents = ['keydown', 'keypress', 'keyup', 'beforeinput'] as const
 
 let hideCursorTimeout: number | null = null
 let messageTimeout: number | null = null
 let countdownInterval: number | null = null
 
-const handlePlayClick = () => {
-  if (canEnterFullscreen.value) {
-    enterFullscreen()
+const getKeyboardApi = () => {
+  return (navigator as Navigator & { keyboard?: BrowserKeyboardApi }).keyboard
+}
+
+const suppressKeyboardInput = (event: Event) => {
+  if (!isFullscreen.value) return
+
+  event.preventDefault()
+  event.stopPropagation()
+  event.stopImmediatePropagation()
+}
+
+const addKeyboardBlockers = () => {
+  blockedKeyboardEvents.forEach((eventName) => {
+    document.addEventListener(eventName, suppressKeyboardInput, true)
+  })
+}
+
+const removeKeyboardBlockers = () => {
+  blockedKeyboardEvents.forEach((eventName) => {
+    document.removeEventListener(eventName, suppressKeyboardInput, true)
+  })
+}
+
+const lockKeyboardIfSupported = async () => {
+  const keyboardApi = getKeyboardApi()
+
+  if (!keyboardApi?.lock) return
+
+  try {
+    await keyboardApi.lock([
+      'Escape',
+      'Tab',
+      'AltLeft',
+      'AltRight',
+      'MetaLeft',
+      'MetaRight',
+      'ControlLeft',
+      'ControlRight'
+    ])
+  } catch {
+    // Ignore unsupported keys or browsers that reject keyboard lock.
   }
 }
 
-const enterFullscreen = () => {
+const unlockKeyboardIfSupported = () => {
+  getKeyboardApi()?.unlock?.()
+}
+
+const handlePlayClick = () => {
+  if (canEnterFullscreen.value) {
+    void enterFullscreen()
+  }
+}
+
+const enterFullscreen = async () => {
   if (!fullscreenDiv.value) return
 
   const el = fullscreenDiv.value
-  if (el.requestFullscreen) {
-    el.requestFullscreen()
-  } else if ((el as any).mozRequestFullScreen) {
-    (el as any).mozRequestFullScreen()
-  } else if ((el as any).webkitRequestFullscreen) {
-    (el as any).webkitRequestFullscreen()
-  } else if ((el as any).msRequestFullscreen) {
-    (el as any).msRequestFullscreen()
+
+  if (document.activeElement instanceof HTMLElement) {
+    document.activeElement.blur()
   }
 
-  isFullscreen.value = true
-  hideCursorAfterDelay()
+  addKeyboardBlockers()
+
+  try {
+    if (el.requestFullscreen) {
+      await el.requestFullscreen()
+    } else if ((el as any).mozRequestFullScreen) {
+      (el as any).mozRequestFullScreen()
+    } else if ((el as any).webkitRequestFullscreen) {
+      (el as any).webkitRequestFullscreen()
+    } else if ((el as any).msRequestFullscreen) {
+      (el as any).msRequestFullscreen()
+    }
+
+    isFullscreen.value = true
+    hideCursorAfterDelay()
+    await lockKeyboardIfSupported()
+  } catch {
+    resetState()
+  }
 }
 
 const exitFullscreen = () => {
+  unlockKeyboardIfSupported()
+
   if (document.exitFullscreen) {
-    document.exitFullscreen()
+    void document.exitFullscreen()
   } else if ((document as any).mozCancelFullScreen) {
     (document as any).mozCancelFullScreen()
   } else if ((document as any).webkitExitFullscreen) {
@@ -80,10 +155,12 @@ const exitFullscreen = () => {
 
 const resetState = () => {
   isFullscreen.value = false
-  isPaused.value = false
   canEnterFullscreen.value = false
   showCursor.value = false
   showMessage.value = false
+
+  removeKeyboardBlockers()
+  unlockKeyboardIfSupported()
 
   if (hideCursorTimeout) clearTimeout(hideCursorTimeout)
   if (messageTimeout) clearTimeout(messageTimeout)
@@ -91,35 +168,38 @@ const resetState = () => {
 
   countdownValue.value = messageDisplayTime / 1000
 
-  setTimeout(() => {
+  window.setTimeout(() => {
     canEnterFullscreen.value = true
   }, fullscreenCooldown)
 }
 
 const handleFullscreenClick = () => {
   if (isFullscreen.value) {
-    if (!isPaused.value) {
-      isPaused.value = true
-    } else {
-      exitFullscreen()
-    }
-  }
-}
-
-const handleFullscreenDoubleClick = () => {
-  if (isFullscreen.value) {
     exitFullscreen()
   }
 }
 
 const exitHandler = () => {
-  if (!document.fullscreenElement && !(document as any).webkitIsFullScreen && !(document as any).mozFullScreen && !(document as any).msFullscreenElement) {
+  const stillFullscreen = Boolean(
+    document.fullscreenElement ||
+      (document as any).webkitIsFullScreen ||
+      (document as any).mozFullScreen ||
+      (document as any).msFullscreenElement
+  )
+
+  if (!stillFullscreen) {
     resetState()
+    return
   }
+
+  isFullscreen.value = true
+  addKeyboardBlockers()
+  void lockKeyboardIfSupported()
 }
 
 const hideCursorAfterDelay = () => {
   if (hideCursorTimeout) clearTimeout(hideCursorTimeout)
+
   hideCursorTimeout = window.setTimeout(() => {
     showCursor.value = false
   }, cursorHideDelay)
@@ -127,12 +207,14 @@ const hideCursorAfterDelay = () => {
 
 const startCountdown = () => {
   if (countdownInterval) clearInterval(countdownInterval)
+
   countdownValue.value = messageDisplayTime / 1000
 
   countdownInterval = window.setInterval(() => {
-    countdownValue.value--
-    if (countdownValue.value <= 0) {
-      if (countdownInterval) clearInterval(countdownInterval)
+    countdownValue.value -= 1
+
+    if (countdownValue.value <= 0 && countdownInterval) {
+      clearInterval(countdownInterval)
     }
   }, 1000)
 }
@@ -168,6 +250,9 @@ onUnmounted(() => {
   document.removeEventListener('webkitfullscreenchange', exitHandler)
   document.removeEventListener('mozfullscreenchange', exitHandler)
   document.removeEventListener('MSFullscreenChange', exitHandler)
+
+  removeKeyboardBlockers()
+  unlockKeyboardIfSupported()
 
   if (hideCursorTimeout) clearTimeout(hideCursorTimeout)
   if (messageTimeout) clearTimeout(messageTimeout)
