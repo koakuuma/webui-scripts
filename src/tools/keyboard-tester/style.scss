@@ -1,0 +1,343 @@
+:root {
+  color-scheme: dark;
+  --page-bg: #1b1d22;
+  --page-bg-soft: #23262c;
+  --frame: #8f877d;
+  --frame-border: #aca397;
+  --frame-inner-border: rgba(70, 63, 55, 0.18);
+  --text: #edf0f3;
+  --text-soft: rgba(237, 240, 243, 0.52);
+  --text-inverse: #000000;
+  --idle-border: rgba(255, 255, 255, 0.14);
+  --idle-shadow: rgba(0, 0, 0, 0.22);
+  --tested-border: rgba(255, 255, 255, 0.18);
+  --tested-shadow: rgba(0, 0, 0, 0.16);
+  --pressed-border: #f0c14b;
+  --pressed-shadow: rgba(0, 0, 0, 0.12);
+  --unit: 52px;
+  --key-height: 52px;
+  --gap: 7px;
+}
+
+html,
+body,
+#app {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  overflow: hidden;
+  background:
+    radial-gradient(circle at top, rgba(255, 255, 255, 0.05), transparent 34%),
+    linear-gradient(180deg, var(--page-bg-soft) 0%, var(--page-bg) 100%);
+  color: var(--text);
+  font-family: 'Cascadia Code', 'Segoe UI', 'Microsoft YaHei UI', sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+.keyboard-tester {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  padding: clamp(18px, 2.2vw, 28px);
+  overflow: hidden;
+}
+
+.keyboard-tester,
+.keyboard-tester * {
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.page-controls {
+  position: absolute;
+  top: 18px;
+  left: 22px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.traffic-light {
+  width: 12px;
+  height: 12px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  cursor: pointer;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18);
+}
+
+.traffic-light.is-red {
+  background: #ff5f57;
+}
+
+.traffic-light.is-yellow {
+  background: #febc2e;
+}
+
+.traffic-light.is-green {
+  background: #28c840;
+}
+
+.keyboard-viewport {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  padding: clamp(20px, 3vw, 44px);
+  background: transparent;
+  box-shadow: none;
+  overflow: hidden;
+  outline: none;
+}
+
+.keyboard-scale {
+  position: relative;
+  z-index: 1;
+  transform-origin: center center;
+}
+
+.keyboard-shell-frame {
+  display: inline-grid;
+  padding: 18px;
+  border: 1px solid var(--frame-border);
+  border-radius: 28px;
+  background:
+    linear-gradient(180deg, #a79f94 0%, var(--frame) 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.14),
+    inset 0 0 0 1px var(--frame-inner-border),
+    0 24px 60px rgba(0, 0, 0, 0.28);
+}
+
+.keyboard-deck {
+  display: inline-grid;
+  gap: 14px;
+  width: max-content;
+  padding: 8px;
+  border-radius: 18px;
+  background:
+    linear-gradient(180deg, #b4aca1 0%, #9f978b 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.18),
+    inset 0 0 0 1px rgba(82, 74, 64, 0.12);
+}
+
+.function-main,
+.nav-top-block,
+.alpha-row {
+  display: flex;
+  gap: var(--gap);
+  min-width: max-content;
+}
+
+.keyboard-grid {
+  display: grid;
+  grid-template-columns: auto auto auto;
+  grid-template-rows: auto auto;
+  gap: 14px;
+  align-items: start;
+}
+
+.function-main {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.nav-top-block {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.alpha-block {
+  grid-column: 1;
+  grid-row: 2;
+  display: grid;
+  gap: var(--gap);
+}
+
+.nav-block,
+.numpad-block {
+  display: grid;
+  grid-template-rows: repeat(5, var(--key-height));
+  gap: var(--gap);
+}
+
+.nav-block {
+  grid-column: 2;
+  grid-row: 2;
+  grid-template-columns: repeat(3, var(--unit));
+}
+
+.numpad-block {
+  grid-column: 3;
+  grid-row: 2;
+  grid-template-columns: repeat(4, var(--unit));
+}
+
+.row-spacer {
+  flex: 0 0 calc((var(--unit) + var(--gap)) * var(--units));
+}
+
+.keycap {
+  position: relative;
+  width: calc(var(--unit) * var(--units, 1) + var(--gap) * (var(--units, 1) - 1));
+  min-width: 0;
+  height: var(--key-height);
+  padding: 6px 8px;
+  border: 1px solid var(--idle-border);
+  border-radius: 15px;
+  background: rgba(122, 128, 136, 0.5);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.03),
+    0 8px 14px var(--idle-shadow);
+  overflow: hidden;
+  will-change: transform, background, box-shadow;
+  transition: none;
+}
+
+.grid-key {
+  width: auto;
+  height: auto;
+  min-height: var(--key-height);
+}
+
+.keycap::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: none;
+  pointer-events: none;
+}
+
+.keycap-content {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 3px;
+  height: 100%;
+  text-align: center;
+}
+
+.keycap-secondary {
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 10px;
+  line-height: 1;
+}
+
+.keycap-label {
+  display: block;
+  color: #ffffff;
+  max-width: 100%;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.08;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.align-left .keycap-content {
+  align-items: center;
+}
+
+.align-right .keycap-content {
+  align-items: center;
+  text-align: center;
+}
+
+.is-compact .keycap-label {
+  font-size: 11px;
+}
+
+.is-tight .keycap-label {
+  font-size: 10px;
+}
+
+.is-tested {
+  border-color: var(--tested-border);
+  background: #000000;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.03),
+    0 8px 14px rgba(0, 0, 0, 0.24);
+}
+
+.is-tested .keycap-label,
+.is-tested .keycap-secondary {
+  color: #ffffff;
+}
+
+.is-pressed {
+  transform: translateY(1px);
+  border-color: #ffffff;
+  background: #ffffff;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.35),
+    0 6px 10px var(--pressed-shadow);
+}
+
+.is-pressed .keycap-label,
+.is-pressed .keycap-secondary {
+  color: var(--text-inverse);
+}
+
+.ambient {
+  display: none;
+}
+
+.ambient-a {
+  top: -80px;
+  left: -60px;
+  width: 220px;
+  height: 220px;
+  background: rgba(255, 255, 255, 0.42);
+}
+
+.ambient-b {
+  right: -80px;
+  bottom: -80px;
+  width: 260px;
+  height: 260px;
+  background: rgba(186, 197, 208, 0.34);
+}
+
+@media (max-width: 1400px) {
+  :root {
+    --unit: 50px;
+    --key-height: 50px;
+  }
+}
+
+@media (max-width: 960px) {
+  :root {
+    --unit: 46px;
+    --key-height: 46px;
+    --gap: 6px;
+  }
+
+  .keyboard-viewport {
+    border-radius: 22px;
+  }
+}
+
+@media (max-width: 720px) {
+  .keyboard-tester {
+    padding: 10px;
+  }
+
+  .keyboard-viewport {
+    padding: 28px 10px 10px;
+  }
+}
