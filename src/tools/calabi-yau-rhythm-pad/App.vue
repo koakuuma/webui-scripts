@@ -7,7 +7,13 @@
     </header>
 
     <main class="stage-shell">
-      <section class="pad-frame" aria-label="Rhythm Pads">
+      <section
+        class="pad-frame"
+        aria-label="Rhythm Pads"
+        @pointerup="endPointerSweep"
+        @pointercancel="endPointerSweep"
+        @lostpointercapture="endPointerSweep"
+      >
         <button
           v-for="pad in pads"
           :key="pad.id"
@@ -17,11 +23,14 @@
             active: activePadId === pad.id,
             hovered: hoveredPadId === pad.id
           }"
-          @mouseenter="hoveredPadId = pad.id"
+          @mouseenter="handlePadEnter(pad.id)"
           @mouseleave="clearHover(pad.id)"
           @focus="hoveredPadId = pad.id"
           @blur="clearHover(pad.id)"
-          @click="triggerPad(pad.id)"
+          @pointerdown.prevent="handlePadPointerDown($event, pad.id)"
+          @pointerenter="handlePadEnter(pad.id)"
+          @pointerup="endPointerSweep"
+          @click.prevent
         >
           <span class="pad-index">{{ String(pad.index).padStart(2, '0') }}</span>
           <strong>{{ pad.id }}</strong>
@@ -43,10 +52,11 @@ type PadInfo = {
 const GITHUB_URL = 'https://github.com/koakuuma/webui-scripts'
 const PAD_TRIGGER_LIMIT = 4
 const PAD_TRIGGER_WINDOW = 1000
-const ACTIVE_FLASH_MS = 180
+const ACTIVE_FLASH_MS = 90
 
-const pads = Array.from({ length: 16 }, (_, index) => {
-  const padNumber = index + 1
+const padOrder = [4, 3, 2, 1, 8, 7, 6, 5, 12, 11, 10, 9, 16, 15, 14, 13]
+
+const pads = padOrder.map((padNumber) => {
   return {
     id: `PAD${padNumber}`,
     index: padNumber,
@@ -56,6 +66,8 @@ const pads = Array.from({ length: 16 }, (_, index) => {
 
 const hoveredPadId = ref('')
 const activePadId = ref('')
+const isPointerPressed = ref(false)
+const lastSweptPadId = ref('')
 const playHistory = reactive<Record<string, number[]>>({})
 const audioMap = new Map<string, HTMLAudioElement>()
 const activeTimerMap = new Map<string, number>()
@@ -66,6 +78,22 @@ pads.forEach((pad) => {
   audio.preload = 'auto'
   audioMap.set(pad.id, audio)
 })
+
+const warmupAudioPlayback = async () => {
+  const firstAudio = audioMap.get('PAD1')
+  if (!firstAudio) return
+
+  try {
+    firstAudio.muted = true
+    firstAudio.currentTime = 0
+    await firstAudio.play()
+    firstAudio.pause()
+    firstAudio.currentTime = 0
+    firstAudio.muted = false
+  } catch {
+    firstAudio.muted = false
+  }
+}
 
 const reloadPage = () => {
   window.location.reload()
@@ -79,6 +107,28 @@ const clearHover = (padId: string) => {
   if (hoveredPadId.value === padId) {
     hoveredPadId.value = ''
   }
+}
+
+const endPointerSweep = () => {
+  isPointerPressed.value = false
+  lastSweptPadId.value = ''
+}
+
+const handlePadEnter = (padId: string) => {
+  hoveredPadId.value = padId
+
+  if (!isPointerPressed.value || lastSweptPadId.value === padId) return
+
+  lastSweptPadId.value = padId
+  void triggerPad(padId)
+}
+
+const handlePadPointerDown = (event: PointerEvent, padId: string) => {
+  hoveredPadId.value = padId
+  isPointerPressed.value = true
+  lastSweptPadId.value = padId
+  ;(event.currentTarget as HTMLElement | null)?.setPointerCapture?.(event.pointerId)
+  void triggerPad(padId)
 }
 
 const flashPad = (padId: string) => {
@@ -109,12 +159,14 @@ const playPadAudio = (padId: string) => {
   const sourceAudio = audioMap.get(padId)
   if (!sourceAudio) return
 
-  const audio = sourceAudio.cloneNode() as HTMLAudioElement
-  audio.currentTime = 0
-  void audio.play().catch(() => undefined)
+  sourceAudio.pause()
+  sourceAudio.currentTime = 0.005
+  void sourceAudio.play().catch(() => undefined)
 }
 
-const triggerPad = (padId: string) => {
+const triggerPad = async (padId: string) => {
+  await warmupAudioPlayback()
+
   if (!canPlayPad(padId)) return
 
   playHistory[padId].push(Date.now())
@@ -233,8 +285,8 @@ button {
   text-align: left;
   cursor: pointer;
   touch-action: manipulation;
-  transition: background-color 0.14s ease, color 0.14s ease, border-color 0.14s ease,
-    transform 0.14s ease;
+  transition: background-color 0.08s ease, color 0.08s ease, border-color 0.08s ease,
+    transform 0.08s ease;
 }
 
 .pad-index {
